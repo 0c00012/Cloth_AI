@@ -1,6 +1,6 @@
 ## 전체 파이프라인
 
-1. **SAM, Mask-R-CNN 등 세그멘테이션에 특화된 딥러닝 모델을 사용하여 사진에서 옷 부분만 crop**
+1. **SAM(세그멘테이션에 특화된 딥러닝 모델)을 사용하여 사진에서 옷 부분만 crop**
 
 ![output.png](attachment:edcfe438-62bb-4689-80ee-d9062f15c02d:output.png)
 
