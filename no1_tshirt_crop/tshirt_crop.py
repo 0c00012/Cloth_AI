@@ -27,18 +27,18 @@ from typing import Optional, List, Tuple  # <-- Python 3.8+ compatible typing
 # =========================
 # USER SETTINGS (edit here)
 # =========================
-INPUTS = [r"C:\Users\_idal\PycharmProjects\Cloth_AI\data\tshirt\org_tshirt"]
-OUTPUT_DIR = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\cropped_tshirt"
+INPUTS = [r"C:\Users\_idal\PycharmProjects\Cloth_AI\data\0819_data"]
+OUTPUT_DIR = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt"
 
 # Cropping / geometry
-CROPS_PER_IMAGE = 3
+CROPS_PER_IMAGE = 5
 AREA_FRAC_RANGE = (0.06, 0.20)  # relative to MASK area
 ASPECT_RANGE    = (0.7, 1.4)    # w/h
 BORDER_MARGIN_PX = 4
 
 # SAM (optional)
 USE_SAM   = True
-SAM_CKPT  = r"C:\models\sam_vit_h_4b8939.pth"  # "" to disable
+SAM_CKPT  = r"C:\Users\_idal\Downloads\sam_vit_h_4b8939.pth"  # "" to disable
 SAM_MODEL = "vit_h"  # vit_h | vit_l | vit_b
 # =========================
 
