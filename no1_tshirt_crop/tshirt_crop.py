@@ -1,5 +1,5 @@
 """
-Random crops strictly INSIDE a garment mask.
+Random crops strictly INSIDE a garment mask. (NO argparse version)
 - 1) Try SAM AutoMaskGenerator (robust to backgrounds & garment types)
 - 2) Fallback to Saliency + GrabCut if SAM isn't available or fails
 - 3) Pick random rectangles guaranteed fully inside the mask (morphological test)
@@ -11,7 +11,7 @@ Dependencies:
   pip install torch torchvision
   pip install git+https://github.com/facebookresearch/segment-anything.git
 
-Prepare a SAM checkpoint (e.g., sam_vit_h_4b8939.pth) and pass its path via --sam_ckpt.
+Configure paths below and run:  python script.py
 """
 
 import os
@@ -20,18 +20,42 @@ import sys
 import math
 import json
 import random
-import argparse
 import numpy as np
 from pathlib import Path
+from typing import Optional, List, Tuple  # <-- Python 3.8+ compatible typing
+
+# =========================
+# USER SETTINGS (edit here)
+# =========================
+INPUTS = [r"C:\Users\_idal\PycharmProjects\Cloth_AI\data\tshirt\org_tshirt"]
+OUTPUT_DIR = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\cropped_tshirt"
+
+# Cropping / geometry
+CROPS_PER_IMAGE = 3
+AREA_FRAC_RANGE = (0.06, 0.20)  # relative to MASK area
+ASPECT_RANGE    = (0.7, 1.4)    # w/h
+BORDER_MARGIN_PX = 4
+
+# SAM (optional)
+USE_SAM   = True
+SAM_CKPT  = r"C:\models\sam_vit_h_4b8939.pth"  # "" to disable
+SAM_MODEL = "vit_h"  # vit_h | vit_l | vit_b
+# =========================
+
 
 # ----------------------------
 # SAM (optional) lazy import
 # ----------------------------
 def load_sam(ckpt_path: str, model_type: str = "vit_h"):
     try:
+        import torch
         from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+        if not ckpt_path or not Path(ckpt_path).exists():
+            raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+
         sam = sam_model_registry[model_type](checkpoint=ckpt_path)
-        sam.to("cuda" if cv2.cuda.getCudaEnabledDeviceCount() > 0 else "cpu")
+        device = "cuda" if getattr(torch, "cuda", None) and torch.cuda.is_available() else "cpu"
+        sam.to(device)
         auto = SamAutomaticMaskGenerator(
             sam,
             points_per_side=16,
@@ -42,6 +66,7 @@ def load_sam(ckpt_path: str, model_type: str = "vit_h"):
             crop_n_points_downscale_factor=2,
             min_mask_region_area=512,   # remove tiny
         )
+        print(f"[INFO] SAM loaded ({model_type}) on {device}")
         return auto
     except Exception as e:
         print(f"[WARN] SAM not available or failed to load: {e}")
@@ -68,7 +93,7 @@ def close_fill(mask: np.ndarray, k_close=13) -> np.ndarray:
     inv = cv2.bitwise_not(flood)
     return cv2.bitwise_or(mask, inv)
 
-def mask_from_sam(auto_gen, image_bgr: np.ndarray) -> np.ndarray:
+def mask_from_sam(auto_gen, image_bgr: np.ndarray) -> Optional[np.ndarray]:
     """Generate a single garment-like mask from SAM AutoMaskGenerator outputs."""
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     proposals = auto_gen.generate(image_rgb)
@@ -86,13 +111,11 @@ def mask_from_sam(auto_gen, image_bgr: np.ndarray) -> np.ndarray:
         area = m.sum()
         if area < 0.03*img_area or area > 0.85*img_area:
             continue
-        # centrality score
         ys, xs = np.where(m > 0)
         if len(xs) == 0:
             continue
         mx, my = xs.mean(), ys.mean()
         d = math.hypot(mx - cx, my - cy) / math.hypot(cx, cy)  # 0~1
-        # shape penalty (very long skinny shapes down-weight)
         y1, x1, y2, x2 = ys.min(), xs.min(), ys.max(), xs.max()
         ar = (x2-x1+1) / (y2-y1+1 + 1e-6)
         skinny_penalty = min(ar, 1/ar)
@@ -112,9 +135,13 @@ def mask_from_grabcut(image_bgr: np.ndarray) -> np.ndarray:
     """Fallback: saliency -> initial rect -> GrabCut -> binary mask."""
     H, W = image_bgr.shape[:2]
     # 1) saliency to get rough bbox (OpenCV fine-grained)
-    sal = cv2.saliency.StaticSaliencyFineGrained_create()
-    ok, salmap = sal.computeSaliency(image_bgr)
-    if not ok:  # very old OpenCV builds might not have saliency module
+    try:
+        sal = cv2.saliency.StaticSaliencyFineGrained_create()
+        ok, salmap = sal.computeSaliency(image_bgr)
+        if not ok:
+            raise RuntimeError("saliency compute failed")
+    except Exception:
+        # Some OpenCV builds don't have saliency module
         salmap = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
         salmap = cv2.GaussianBlur(salmap, (0,0), 3)
         salmap = cv2.normalize(salmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
@@ -143,12 +170,14 @@ def mask_from_grabcut(image_bgr: np.ndarray) -> np.ndarray:
 # ----------------------------
 # Random crop strictly inside mask
 # ----------------------------
-def random_rect_inside_mask(mask: np.ndarray,
-                            area_frac_range=(0.06, 0.20),
-                            aspect_range=(0.7, 1.4),
-                            border_margin_px=4,
-                            max_tries=40):
-    """Return (x1,y1,x2,y2) guaranteed fully inside mask using erosion feasibility."""
+def random_rect_inside_mask(
+    mask: np.ndarray,
+    area_frac_range: Tuple[float, float] = (0.06, 0.20),
+    aspect_range: Tuple[float, float] = (0.7, 1.4),
+    border_margin_px: int = 4,
+    max_tries: int = 40
+) -> Optional[Tuple[int, int, int, int]]:
+    """Return (x1,y1,x2,y2) fully inside mask using erosion feasibility."""
     m = (mask > 0).astype(np.uint8)
     H, W = m.shape
     m[:, :border_margin_px] = 0
@@ -182,10 +211,35 @@ def random_rect_inside_mask(mask: np.ndarray,
     return None
 
 # ----------------------------
-# Main processing
+# Core processing
 # ----------------------------
-def process_image(img_path: Path, out_dir: Path, auto_sam, crops_per_image=1,
-                  area_frac_range=(0.06,0.20), aspect_range=(0.7,1.4)):
+def is_image(p: Path) -> bool:
+    return p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+
+def gather_images(inputs) -> List[Path]:
+    """Accept list of files/folders; return sorted unique image paths (recursive for folders)."""
+    out: List[Path] = []
+    for item in inputs:
+        p = Path(item)
+        if p.is_dir():
+            for ext in (".jpg",".jpeg",".png",".bmp",".webp",".tif",".tiff"):
+                out.extend(p.rglob(f"*{ext}"))
+        elif p.exists() and is_image(p):
+            out.append(p)
+        else:
+            print(f"[WARN] Skipping (not found or not an image): {item}")
+    # unique + sorted
+    return sorted({q.resolve() for q in out})
+
+def process_image(
+    img_path: Path,
+    out_dir: Path,
+    auto_sam,
+    crops_per_image: int = 1,
+    area_frac_range: Tuple[float, float] = (0.06, 0.20),
+    aspect_range: Tuple[float, float] = (0.7, 1.4),
+    border_margin_px: int = 4
+) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     bgr = cv2.imread(str(img_path))
     if bgr is None:
@@ -193,7 +247,7 @@ def process_image(img_path: Path, out_dir: Path, auto_sam, crops_per_image=1,
         return
 
     # 1) get mask
-    mask = None
+    mask: Optional[np.ndarray] = None
     if auto_sam is not None:
         try:
             mask = mask_from_sam(auto_sam, bgr)
@@ -210,11 +264,13 @@ def process_image(img_path: Path, out_dir: Path, auto_sam, crops_per_image=1,
     cv2.imwrite(str(mask_path), mask)
 
     # 3) crops
-    H, W = mask.shape
     saved = []
     for i in range(crops_per_image):
         rect = random_rect_inside_mask(
-            mask, area_frac_range=area_frac_range, aspect_range=aspect_range
+            mask,
+            area_frac_range=area_frac_range,
+            aspect_range=aspect_range,
+            border_margin_px=border_margin_px
         )
         if rect is None:
             print(f"[WARN] No feasible crop for {img_path.name} (try relaxing ranges).")
@@ -245,36 +301,26 @@ def process_image(img_path: Path, out_dir: Path, auto_sam, crops_per_image=1,
         json.dump(meta, f, indent=2, ensure_ascii=False)
     print(f"[OK] {img_path.name}: mask→{mask_path.name}, crops={len(saved)}, overlay→{over_path.name}")
 
-def is_image(p: Path):
-    return p.suffix.lower() in {".jpg",".jpeg",".png",".bmp",".webp",".tif",".tiff"}
+def run() -> None:
+    out_dir = Path(OUTPUT_DIR)
+    if not out_dir.exists():
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, help="Image file or folder")
-    ap.add_argument("--output", required=True, help="Output folder")
-    ap.add_argument("--sam_ckpt", default="", help="Path to SAM checkpoint (e.g., sam_vit_h_4b8939.pth). If empty, fallback pipeline only.")
-    ap.add_argument("--sam_model", default="vit_h", choices=["vit_h","vit_l","vit_b"])
-    ap.add_argument("--crops", type=int, default=1, help="How many random crops per image")
-    ap.add_argument("--area", type=float, nargs=2, default=(0.06,0.20), help="Crop area fraction range relative to MASK area (min max)")
-    ap.add_argument("--aspect", type=float, nargs=2, default=(0.7,1.4), help="Aspect ratio range w/h (min max)")
-    args = ap.parse_args()
+    auto_sam = load_sam(SAM_CKPT, SAM_MODEL) if (USE_SAM and SAM_CKPT) else None
+    imgs = gather_images(INPUTS)
+    if not imgs:
+        print("[ERR] No images found from INPUTS. Check your paths.")
+        return
 
-    in_path = Path(args.input)
-    out_dir = Path(args.output)
-
-    auto_sam = None
-    if args.sam_ckpt:
-        auto_sam = load_sam(args.sam_ckpt, args.sam_model)
-
-    if in_path.is_dir():
-        imgs = [p for p in sorted(in_path.iterdir()) if is_image(p)]
-        for p in imgs:
-            process_image(p, out_dir, auto_sam, args.crops, tuple(args.area), tuple(args.aspect))
-    else:
-        if not is_image(in_path):
-            print("[ERR] Input must be an image file or a folder of images.")
-            sys.exit(1)
-        process_image(in_path, out_dir, auto_sam, args.crops, tuple(args.area), tuple(args.aspect))
+    print(f"[INFO] Found {len(imgs)} image(s). Output: {out_dir}")
+    for p in imgs:
+        process_image(
+            p, out_dir, auto_sam,
+            crops_per_image=CROPS_PER_IMAGE,
+            area_frac_range=AREA_FRAC_RANGE,
+            aspect_range=ASPECT_RANGE,
+            border_margin_px=BORDER_MARGIN_PX
+        )
 
 if __name__ == "__main__":
-    main()
+    run()
