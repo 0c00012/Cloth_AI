@@ -1,0 +1,37 @@
+{
+  "image": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\data\\tshirt\\org_tshirt\\images (1).jpg",
+  "mask": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\images (1)_mask.png",
+  "overlay": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\images (1)_overlay.png",
+  "crops": [
+    {
+      "crop_idx": 1,
+      "rect": [
+        65,
+        125,
+        109,
+        179
+      ],
+      "path": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\images (1)_crop1.png"
+    },
+    {
+      "crop_idx": 2,
+      "rect": [
+        91,
+        119,
+        154,
+        179
+      ],
+      "path": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\images (1)_crop2.png"
+    },
+    {
+      "crop_idx": 3,
+      "rect": [
+        92,
+        48,
+        166,
+        102
+      ],
+      "path": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\images (1)_crop3.png"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "image": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\data\\tshirt\\org_tshirt\\6629e4a252f7ccace1ad678aa971d24d.jpg",
+  "mask": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\6629e4a252f7ccace1ad678aa971d24d_mask.png",
+  "overlay": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\6629e4a252f7ccace1ad678aa971d24d_overlay.png",
+  "crops": [
+    {
+      "crop_idx": 1,
+      "rect": [
+        545,
+        482,
+        949,
+        937
+      ],
+      "path": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\6629e4a252f7ccace1ad678aa971d24d_crop1.png"
+    },
+    {
+      "crop_idx": 2,
+      "rect": [
+        705,
+        687,
+        1051,
+        1039
+      ],
+      "path": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\6629e4a252f7ccace1ad678aa971d24d_crop2.png"
+    },
+    {
+      "crop_idx": 3,
+      "rect": [
+        366,
+        544,
+        810,
+        893
+      ],
+      "path": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\6629e4a252f7ccace1ad678aa971d24d_crop3.png"
+    }
+  ]
+}

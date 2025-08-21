@@ -1,11 +1,11 @@
 # Plain Weave Swatch Generator (bpy) — RECTANGULAR strips (no noise), auto-clearance,
-# single TOP-DOWN light & camera, image textures (UV Project from camera)
+# single TOP-DOWN light & camera, image textures (UV Project from camera or top projector)
 # Blender 3.x / 4.x | Run in Scripting > Run Script
 
 import bpy
 import math
 from math import sin, pi
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
 # =========================
 # 사용자 매개변수 (기본값)
@@ -16,7 +16,7 @@ WEFT_COUNT = 64
 # ── 직사각 단면 치수 (m)
 # 폭: 평면에서 이웃 스트립과 나란히 놓일 때의 가로 치수
 # 두께: Z(위/아래) 방향 치수
-WARP_WIDTH  = 0.05
+WARP_WIDTH  = 0.055
 WARP_THICK  = 0.02
 WEFT_WIDTH  = 0.06
 WEFT_THICK  = 0.02
@@ -46,21 +46,32 @@ USE_CYCLES       = True
 SAMPLES          = 256
 USE_DENOISER     = True
 ADD_CAMERA_LIGHT = True     # 상단 단일 라이트 생성/정렬
-FORCE_TOPDOWN    = True     # 카메라/라이트를 반드시 정중앙 위(-Z)로 정렬
 
 # Cycles GPU 장치 타입
 CYCLES_DEVICE_TYPE = 'CUDA'  # 'CUDA' | 'OPTIX' | 'HIP'
 
 # -------- 상단 단일 라이트 제어 옵션 --------
-LIGHT_ENERGY       = 250.0     # 광량(W)
-LIGHT_HEIGHT       = 1.0      # 샘플 중심 위 높이(m)
-LIGHT_SIZE_X_MULT  = 1.2      # 샘플 폭 대비 X 크기 배율
-LIGHT_SIZE_Y_MULT  = 1.2      # 샘플 높이 대비 Y 크기 배율
+LIGHT_ENERGY       = 250.0   # 광량(W)
+LIGHT_HEIGHT       = 1.0     # 샘플 중심 위 높이(m)
+LIGHT_SIZE_X_MULT  = 1.2     # 샘플 폭 대비 X 크기 배율
+LIGHT_SIZE_Y_MULT  = 1.2     # 샘플 높이 대비 Y 크기 배율
 # -------------------------------------------
 
+# -------- 카메라(비스듬한 시점) 옵션 --------
+OBLIQUE_VIEW        = True    # True면 비스듬한 퍼스펙티브 뷰
+CAMERA_PERSPECTIVE  = True    # 원근(PERSP) 사용
+CAMERA_ELEV_DEG     = 60.0    # 수평면으로부터 고도(°). 90=정수직, 60=살짝 내려옴
+CAMERA_AZIMUTH_DEG = 0.0   # ← 사선(대각) 제거: Z방향 회전 0°
+CAMERA_RADIUS_MULT  = 2.2     # 시료 최대변 길이 대비 거리 배수
+CAMERA_LENS_MM      = 50.0    # mm
+# -------------------------------------------
+
+# UV 투영 방식을 카메라와 분리해서 Top-Down으로 유지할지 여부
+UV_PROJECT_FROM_TOP = True   # True 권장(텍스처 원근 왜곡 방지)
+
 # ====== 경사/위사 텍스처 이미지 경로 ======
-WARP_IMAGE_PATH = r"C:\Users\_idal\Desktop\texture_transferred.jpg"  # 경사
-WEFT_IMAGE_PATH = r"C:\Users\_idal\Downloads\fabric_0035_4k_Lbr8QW\fabric_0035_height_4k.png"    # 위사
+WARP_IMAGE_PATH = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\cropped_tshirt\9a67ffca-6ad4-40f8-8224-5afc44bb4022_crop1.png"  # 경사
+WEFT_IMAGE_PATH = r"C:\Users\_idal\PycharmProjects\Cloth_AI\data\fabric\fabric_0035_roughness_4k.jpg"    # 위사
 
 USE_IMAGE_TEXTURES   = True
 # 타일 배율 (값↑ = 더 촘촘하게 반복)
@@ -108,7 +119,7 @@ def make_material(name, rgba):
     out = nt.nodes.new("ShaderNodeOutputMaterial"); out.location = (400, 0)
     bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled"); bsdf.location = (150, 0)
     _safe_set_input(bsdf, "Base Color", rgba)
-    _safe_set_input(bsdf, "Roughness", 0.8)  # <<< 고정: roughness = 1
+    _safe_set_input(bsdf, "Roughness", 0.8)
     nt.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
     return mat
 
@@ -130,7 +141,6 @@ def make_rect_profile(name, width, thickness):
     cu.fill_mode = 'BOTH'
     sp = cu.splines.new('POLY')
     sp.use_cyclic_u = True
-    # 로컬 XY에서 중심(0,0)에 폭/두께의 직사각형
     hw = float(width)   * 0.5
     ht = float(thickness) * 0.5
     pts = [(-hw, -ht, 0.0), ( hw, -ht, 0.0), ( hw,  ht, 0.0), (-hw,  ht, 0.0)]
@@ -237,7 +247,6 @@ def setup_cycles_engine(use_cycles=True, samples=256, enable_gpu=True, device_ty
 
 # ---------- 이미지 텍스처 & UV 투영(스칼라 Math 노드로 회전/스케일 처리) ----------
 def make_image_material(name, image_path, repeat=(1.0, 1.0), rotate_deg=0.0, roughness=1.0):
-    # (원본과 동일) — 생략 없이 유지
     img = None
     try:
         img = bpy.data.images.load(image_path, check_existing=True)
@@ -280,8 +289,9 @@ def make_image_material(name, image_path, repeat=(1.0, 1.0), rotate_deg=0.0, rou
         except Exception:
             pass
 
-    bsdf.inputs["Roughness"].default_value = 1.0  # <<< 고정: roughness = 1
+    bsdf.inputs["Roughness"].default_value = roughness
 
+    # UV 좌표 전처리(중심 기준 이동 → 스케일 → 회전 → 복귀)
     nt.links.new(tco.outputs.get("UV") or tco.outputs["Generated"], sep.inputs["Vector"])
     nt.links.new(sep.outputs["X"], subx.inputs[0]); subx.inputs[1].default_value = 0.5
     nt.links.new(sep.outputs["Y"], suby.inputs[0]); suby.inputs[1].default_value = 0.5
@@ -338,7 +348,7 @@ def ensure_uv_project_modifier(obj, projector_obj, uv_name="UVMap"):
     mod.aspect_x = 1.0
     mod.aspect_y = 1.0
 
-def apply_images_to_warp_weft(warp_objs, weft_objs, camera_obj,
+def apply_images_to_warp_weft(warp_objs, weft_objs, projector_obj,
                               warp_img_path, weft_img_path,
                               warp_repeat=(1.0,1.0), weft_repeat=(1.0,1.0),
                               rotate_weft_90=False):
@@ -359,78 +369,106 @@ def apply_images_to_warp_weft(warp_objs, weft_objs, camera_obj,
     # UV Project + 머티리얼 지정
     for obj in warp_objs:
         if obj and obj.type == 'MESH':
-            ensure_uv_project_modifier(obj, camera_obj, uv_name="UVMap")
+            ensure_uv_project_modifier(obj, projector_obj, uv_name="UVMap")
             if obj.data.materials: obj.data.materials[0] = mat_warp_img
             else: obj.data.materials.append(mat_warp_img)
     for obj in weft_objs:
         if obj and obj.type == 'MESH':
-            ensure_uv_project_modifier(obj, camera_obj, uv_name="UVMap")
+            ensure_uv_project_modifier(obj, projector_obj, uv_name="UVMap")
             if obj.data.materials: obj.data.materials[0] = mat_weft_img
             else: obj.data.materials.append(mat_weft_img)
 
-# ---------- 카메라 & 상단 단일 라이트 (정확히 수직 TOP-DOWN 보장) ----------
+# ---------- 카메라 & 상단 단일 라이트 (비스듬한 시점 지원) ----------
 def setup_camera_and_top_light(add_camera_light=True, total_w=1.0, total_h=1.0):
     scene = bpy.context.scene
+    smax = max(float(total_w), float(total_h))
 
-    # 카메라(정사각 샘플을 꽉 채우도록, ORTHO)
+    # 카메라 준비
     cam = bpy.data.objects.get("WeaveCam")
     if cam is None:
         cam_data = bpy.data.cameras.new("WeaveCam")
         cam = bpy.data.objects.new("WeaveCam", cam_data)
         scene.collection.objects.link(cam)
-
-    # === TOP-DOWN을 강제로 보장 ===
     cam.rotation_mode = 'XYZ'
-    cam.rotation_euler = (0.0, 0.0, 0.0)  # X축 방향으로 3도 아래 기울임
-
-    cam.location = (0.0, 0.0, max(0.25, 0.6 * max(total_w, total_h))) if FORCE_TOPDOWN else (0.0, 0.0, 0.25)
-    cam.matrix_world = Matrix.Translation(cam.location)
-    if cam.parent:
-        cam.parent = None
     if hasattr(cam.data, "shift_x"): cam.data.shift_x = 0.0
     if hasattr(cam.data, "shift_y"): cam.data.shift_y = 0.0
-
-    cam.data.type = 'ORTHO'
-    cam.data.ortho_scale = max(total_w, total_h) * 1.5
     cam.data.clip_start = 0.001
     cam.data.clip_end   = 100.0
+    if OBLIQUE_VIEW:
+        # ── '사선 없이 아래로 눕히기': yaw(방위각)=0, roll=0, pitch(고도)만 적용 ──
+        cam.data.type = 'PERSP' if CAMERA_PERSPECTIVE else 'ORTHO'
+        if not CAMERA_PERSPECTIVE:
+            cam.data.ortho_scale = smax * 1.15  # 프레임 여유
 
-    scene.camera = cam
+        if hasattr(cam.data, "lens"):
+            cam.data.lens = float(CAMERA_LENS_MM)
 
-    if not add_camera_light:
-        return
+        elev = math.radians(float(CAMERA_ELEV_DEG))   # 90=정수직, 60=살짝 눕힘
+        r = max(0.25, float(CAMERA_RADIUS_MULT) * smax)
+        r *= float(0.7)
 
-    # 기존 라이트 정리: 'Light' 하나만 남기기
-    keep_name = "Light"
-    for obj in list(scene.objects):
-        if obj.type == 'LIGHT' and obj.name != keep_name:
-            bpy.data.objects.remove(obj, do_unlink=True)
+        # yaw=0: X=0에 두고 Y축 방향으로만 거리 확보(사선 금지)
+        x = 0.0
+        y = -r * math.cos(elev)   # 카메라가 -Y 쪽에서 바라보도록
+        z =  r * math.sin(elev)
+        cam.location = (x, y, z)
 
-    # 'Light' 재사용/생성
-    light = bpy.data.objects.get(keep_name)
-    if light is None:
-        light_data = bpy.data.lights.new(name=keep_name, type='AREA')
-        light = bpy.data.objects.new(name=keep_name, object_data=light_data)
-        scene.collection.objects.link(light)
+        # 원점 바라보되, '화면의 위'를 세계 Z(Up)로 강제 → 롤 0 보장
+        from mathutils import Vector, Matrix
+        forward   = (Vector((0.0, 0.0, 0.0)) - Vector(cam.location)).normalized()
+        world_up  = Vector((0.0, 0.0, 1.0))
+        right     = forward.cross(world_up).normalized()
+        up        = right.cross(forward).normalized()
 
-    # AREA(Rectangle)로 설정하고, -Z 방향 직하
-    light.data.type = 'AREA'
-    light.data.shape = 'RECTANGLE'
-    sx = max(total_w * LIGHT_SIZE_X_MULT, 0.05)
-    sy = max(total_h * LIGHT_SIZE_Y_MULT, 0.05)
-    light.data.size   = sx
-    light.data.size_y = sy
+        rot_mat = Matrix((
+            (right.x,  up.x,  -forward.x),
+            (right.y,  up.y,  -forward.y),
+            (right.z,  up.z,  -forward.z),
+        ))
+        cam.rotation_euler = rot_mat.to_euler('XYZ')
 
-    light.rotation_mode = 'XYZ'
-    light.rotation_euler = (0.0, 0.0, 0.0)
-    light.location = (0.0, 0.0, LIGHT_HEIGHT)
-    if light.parent:
-        light.parent = None
-    light.matrix_world = Matrix.Translation(light.location)
 
-    light.data.energy = max(float(LIGHT_ENERGY), 0.0)
-    if hasattr(light.data, "use_contact_shadow"):
-        light.data.use_contact_shadow = True
+    # ── 상단 단일 라이트(직하) ──
+    light = None
+    if add_camera_light:
+        keep_name = "Light"
+        for obj in list(scene.objects):
+            if obj.type == 'LIGHT' and obj.name != keep_name:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        light = bpy.data.objects.get(keep_name)
+        if light is None:
+            light_data = bpy.data.lights.new(name=keep_name, type='AREA')
+            light = bpy.data.objects.new(name=keep_name, object_data=light_data)
+            scene.collection.objects.link(light)
+        light.data.type = 'AREA'
+        light.data.shape = 'RECTANGLE'
+        light.data.size   = max(smax * LIGHT_SIZE_X_MULT, 0.05)
+        light.data.size_y = max(smax * LIGHT_SIZE_Y_MULT, 0.05)
+        light.rotation_mode = 'XYZ'
+        light.rotation_euler = (0.0, 0.0, 0.0)  # -Z 직하
+        light.location = (0.0, 0.0, LIGHT_HEIGHT)
+        light.data.energy = max(float(LIGHT_ENERGY), 0.0)
+        if hasattr(light.data, "use_contact_shadow"):
+            light.data.use_contact_shadow = True
+
+    return cam, light
+
+# ---------- Top-Down UV 프로젝터(Ortho 카메라) ----------
+def get_or_create_uv_projector(total_w, total_h, name="UVProjectorTop"):
+    smax = max(float(total_w), float(total_h))
+    cam = bpy.data.objects.get(name)
+    if cam is None:
+        cam_data = bpy.data.cameras.new(name)
+        cam = bpy.data.objects.new(name, cam_data)
+        bpy.context.scene.collection.objects.link(cam)
+    cam.data.type = 'ORTHO'
+    cam.data.ortho_scale = smax * 1.5
+    cam.location = (0.0, 0.0, 1.0)
+    cam.rotation_mode = 'XYZ'
+    cam.rotation_euler = (0.0, 0.0, 0.0)  # -Z 직하
+    cam.data.clip_start = 0.001
+    cam.data.clip_end = 100.0
+    return cam
 
 def generate_plain_weave(
     warp_count, weft_count,
@@ -465,13 +503,13 @@ def generate_plain_weave(
     if prof_weft is None:
         prof_weft = make_rect_profile("Profile_Weft_Rect", weft_width, weft_thick)
 
-    # 프로파일은 보조 객체이므로 뷰에서 보이지 않게(선택사항)
+    # 보조 객체 숨김
     prof_warp.hide_set(True); prof_weft.hide_set(True)
     if hasattr(prof_warp, "hide_render"): prof_warp.hide_render = True
     if hasattr(prof_weft, "hide_render"): prof_weft.hide_render = True
 
-    mat_warp = make_material("Mat_Warp", warp_color)
-    mat_weft = make_material("Mat_Weft", weft_color)
+    mat_warp = make_material("Mat_Warp", WARP_COLOR)
+    mat_weft = make_material("Mat_Weft", WEFT_COLOR)
 
     total_w = warp_count * spacing_warp
     total_h = weft_count * spacing_weft
@@ -506,7 +544,7 @@ def generate_plain_weave(
     if warp_objs:
         bpy.context.view_layer.objects.active = warp_objs[0]
 
-    # 카메라 + 상단 단일 라이트 (정확한 TOP-DOWN 강제)
+    # 카메라 + 상단 단일 라이트 (비스듬한 시점 또는 TOP-DOWN)
     setup_camera_and_top_light(add_camera_light=add_camera_light, total_w=total_w, total_h=total_h)
 
     # 뷰포트 카메라 보기
@@ -564,13 +602,16 @@ def main():
     )
     print(f"[INFO] total size (m): {result['total_w']:.4f} × {result['total_h']:.4f}")
 
-    # 경사/위사에 이미지 텍스처 덮어씌우기 (카메라 투영 UV)
+    # 경사/위사에 이미지 텍스처 덮어씌우기 (UV Project)
     if USE_IMAGE_TEXTURES:
-        cam = bpy.data.objects.get("WeaveCam")
-        if cam is None:
-            raise RuntimeError("WeaveCam 카메라를 찾을 수 없습니다. (generate_plain_weave에서 생성됩니다)")
+        if UV_PROJECT_FROM_TOP:
+            projector = get_or_create_uv_projector(result["total_w"], result["total_h"])  # Top-down UV
+        else:
+            projector = bpy.data.objects.get("WeaveCam")  # 카메라 자체로 UV 투영(원근왜곡 가능)
+            if projector is None:
+                raise RuntimeError("WeaveCam 카메라를 찾을 수 없습니다.")
         apply_images_to_warp_weft(
-            result["warp_objs"], result["weft_objs"], cam,
+            result["warp_objs"], result["weft_objs"], projector,
             warp_img_path=WARP_IMAGE_PATH,  # 경사용 이미지
             weft_img_path=WEFT_IMAGE_PATH,  # 위사용 이미지
             warp_repeat=TEX_REPEAT_WARP_UV,

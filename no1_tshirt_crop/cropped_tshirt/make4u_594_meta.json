@@ -1,0 +1,37 @@
+{
+  "image": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\data\\tshirt\\org_tshirt\\make4u_594.jpg",
+  "mask": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\make4u_594_mask.png",
+  "overlay": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\make4u_594_overlay.png",
+  "crops": [
+    {
+      "crop_idx": 1,
+      "rect": [
+        131,
+        299,
+        290,
+        428
+      ],
+      "path": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\make4u_594_crop1.png"
+    },
+    {
+      "crop_idx": 2,
+      "rect": [
+        203,
+        159,
+        351,
+        317
+      ],
+      "path": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\make4u_594_crop2.png"
+    },
+    {
+      "crop_idx": 3,
+      "rect": [
+        184,
+        223,
+        326,
+        366
+      ],
+      "path": "C:\\Users\\_idal\\PycharmProjects\\Cloth_AI\\no1_tshirt_crop\\cropped_tshirt\\make4u_594_crop3.png"
+    }
+  ]
+}
