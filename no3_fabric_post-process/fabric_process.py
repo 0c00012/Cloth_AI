@@ -1,4 +1,4 @@
-# Fabric megavariations generator (≈20 variants)
+# Fabric megavariations generator (≈20 variants)hello
 # deps: pillow, numpy
 from PIL import Image, ImageFilter, ImageOps
 import numpy as np, os, math, itertools, pathlib, random
