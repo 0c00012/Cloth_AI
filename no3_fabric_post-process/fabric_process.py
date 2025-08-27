@@ -138,7 +138,7 @@ def weave_render(im_rgb, pattern, tile=18, thread_ratio=0.62, edge_soft=0.25,
     H,W = im_rgb.shape[:2]
     base = im_rgb.copy()
 
-    # --- patterns ---
+    # --- patterns ---ukhuhuhiu
     if pattern=="linen":
         tex = linen_texture(H,W, seed=extra.get("seed",42) if extra else 42)
         emb = to_np(to_img(tex).filter(ImageFilter.Kernel((3,3),[-2,-1,0,-1,1,1,0,1,2],1)).convert("L"))
