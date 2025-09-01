@@ -1,78 +1,83 @@
+# -*- coding: utf-8 -*-
 import bpy
 import math
 import os
+import csv
+import random
 from math import sin, pi
 from mathutils import Matrix, Vector
 
-# ========================= (렌더/입출력) =========================
-DO_RENDER   = True   # ▶ 순차 렌더 실행 여부
-OUTPUT_DIR  = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no2_blender_swatch_maker\render_output\batch"
-
-# ========================= (원단 이미지 경로) ====================
-# 제공하신 4개 원단을 순서대로 사용합니다.
-FABRIC_PATHS = [
+# ================================================================
+#                      사용자 설정 (필수 확인)
+# ================================================================
+DO_RENDER        = True
+OUTPUT_DIR       = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no2_blender_swatch_maker\render_output\ramdom_batch"
+FABRIC_PATHS     = [
     r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt\KakaoTalk_20230321_093636783_18_crop3.png",
     r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt\KakaoTalk_20230321_093636783_14_crop3.png",
     r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt\KakaoTalk_20230321_093636783_21_crop4.png",
-    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt\KakaoTalk_20230321_093727482_crop3.png",
+    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt\KakaoTalk_20230321_093727482_14_crop5.png",
 ]
 
-# ========================= (직물 매개변수) =======================
-WARP_COUNT = 64
-WEFT_COUNT = 64
-WARP_WIDTH  = 0.055
-WARP_THICK  = 0.02
-WEFT_WIDTH  = 0.06
-WEFT_THICK  = 0.02
+VARIATION_COUNT  = 50
+GLOBAL_SEED      = 42     # None이면 매 실행마다 다른 결과. 고정 재현 원하면 정수 지정.
 
-SPACING_WARP = 0.09
-SPACING_WEFT = 0.06
-CRIMP_AMP   = 0.0032
-AUTO_CLEARANCE   = True
-CLEARANCE_MARGIN = 0.05
-STEPS_PER_CELL = 6
-BEVEL_RES      = 3
-RESOLUTION_U   = 24
+# -------- 기본 직물 해상도/엔진 ----------
+USE_CYCLES       = True
+SAMPLES          = 256
+USE_DENOISER     = True
+CYCLES_DEVICE    = 'CUDA'
 
-WARP_COLOR = (0.08, 0.08, 0.08, 1.0)
-WEFT_COLOR = (0.85, 0.85, 0.85, 1.0)
-
-# ========================= (렌더 엔진/라이트) ====================
-USE_CYCLES   = True
-SAMPLES      = 256
-USE_DENOISER = True
-CYCLES_DEVICE_TYPE = 'CUDA'
-
-ADD_CAMERA_LIGHT = True
+# -------- 카메라/라이트 ----------
+ADD_CAMERA_LIGHT = True   # ← 조명 "건드리지 않기" 기본
 LIGHT_ENERGY      = 250.0
 LIGHT_HEIGHT      = 1.0
 LIGHT_SIZE_X_MULT = 1.2
 LIGHT_SIZE_Y_MULT = 1.2
 
-# ========================= (카메라) ==============================
 OBLIQUE_VIEW       = True
 CAMERA_PERSPECTIVE = True
 CAMERA_ELEV_DEG    = 60.0
 CAMERA_AZIMUTH_DEG = 0.0
 CAMERA_RADIUS_MULT = 2.2
 CAMERA_LENS_MM     = 50.0
+WEAVECAM_LOCATION  = (0.0, -4.3352, 7.6820)
+WEAVECAM_LOOK_AT_TARGET = True
+WEAVECAM_ROTATION_EULER_DEG = None
 
-# ▶ WeaveCam 절대 위치/회전(기존 요구대로 상단에 유지)
-WEAVECAM_LOCATION = (0.0, -4.3352, 7.6820)   # 원하는 값으로 변경
-WEAVECAM_LOOK_AT_TARGET = True               # target(OBJECT_OFFSET) 바라보도록
-WEAVECAM_ROTATION_EULER_DEG = None          # (rx, ry, rz) 도 단위 직접 지정 시 사용
-
-# ========================= (텍스처/UV/오프셋) ====================
+# -------- UV/텍스처 ----------
 UV_PROJECT_FROM_TOP = True
-USE_IMAGE_TEXTURES  = True
-TEX_REPEAT_WARP_UV  = (1.0, 1.0)
-TEX_REPEAT_WEFT_UV  = (1.0, 1.0)
-ROTATE_WEFT_90_DEG  = False
-OBJECT_OFFSET       = (0.0, 0.1, 0.0)
+TEX_REPEAT_RANGE    = (0.8, 2.2)   # 무작위 타일 스케일 범위
+ROTATE_WEFT_90_PROB = 0.5          # 위사 텍스처 90° 회전 확률
+
+# -------- 베이스 치수(랜덤은 이 주변에서 결정) ----------
+WARP_COUNT   = 64
+WEFT_COUNT   = 64
+
+BASE_WARP_WIDTH  = 0.055
+BASE_WARP_THICK  = 0.020
+BASE_WEFT_WIDTH  = 0.060
+BASE_WEFT_THICK  = 0.020
+
+BASE_SPACING_WARP = 0.090
+BASE_SPACING_WEFT = 0.060
+BASE_CRIMP_AMP    = 0.0032
+
+AUTO_CLEARANCE    = True
+CLEARANCE_MARGIN  = 0.05
+
+STEPS_PER_CELL    = 6
+BEVEL_RES         = 3
+RESOLUTION_U      = 24
+
+WARP_COLOR        = (0.08, 0.08, 0.08, 1.0)
+WEFT_COLOR        = (0.85, 0.85, 0.85, 1.0)
+
+OBJECT_OFFSET     = (0.0, 0.1, 0.0)
 
 # ================================================================
-
-
+#                          유틸/내부 함수
+# ================================================================
 def clean_collection(name: str):
     scene = bpy.context.scene
     root = scene.collection
@@ -130,6 +135,11 @@ def make_rect_profile(name, width, thickness):
     obj = bpy.data.objects.new(name, cu)
     bpy.context.scene.collection.objects.link(obj)
     return obj
+
+def delete_object_if_exists(name):
+    obj = bpy.data.objects.get(name)
+    if obj:
+        bpy.data.objects.remove(obj, do_unlink=True)
 
 def build_axis_curve(axis, fixed_pos, count_other, spacing_along, idx_self, mat,
                      width, thickness, steps_per_cell=6, crimp_amp=0.0032,
@@ -360,15 +370,19 @@ def generate_plain_weave(
             crimp_amp, warp_thick, weft_thick, clearance_margin
         )
     col=clean_collection("PlainWeave_Swatch")
-    prof_warp=bpy.data.objects.get("Profile_Warp_Rect") or make_rect_profile("Profile_Warp_Rect", warp_width, warp_thick)
-    prof_weft=bpy.data.objects.get("Profile_Weft_Rect") or make_rect_profile("Profile_Weft_Rect", weft_width, weft_thick)
+
+    # 프로파일(폭/두께 갱신을 위해 항상 재생성)
+    delete_object_if_exists("Profile_Warp_Rect")
+    delete_object_if_exists("Profile_Weft_Rect")
+    prof_warp=make_rect_profile("Profile_Warp_Rect", warp_width, warp_thick)
+    prof_weft=make_rect_profile("Profile_Weft_Rect", weft_width, weft_thick)
     try:
         prof_warp.hide_set(True); prof_weft.hide_set(True)
         prof_warp.hide_render=True; prof_weft.hide_render=True
     except Exception: pass
 
-    mat_warp=make_material("Mat_Warp", WARP_COLOR)
-    mat_weft=make_material("Mat_Weft", WEFT_COLOR)
+    mat_warp=make_material("Mat_Warp_Base", WARP_COLOR)
+    mat_weft=make_material("Mat_Weft_Base", WEFT_COLOR)
 
     total_w=warp_count*spacing_warp
     total_h=weft_count*spacing_weft
@@ -390,9 +404,8 @@ def generate_plain_weave(
     return {"collection": col, "total_w": total_w, "total_h": total_h,
             "warp_objs": warp_objs, "weft_objs": weft_objs}
 
-# ---------- 멀티 원단 패턴 적용 ----------
-def build_material_bank(paths, prefix_w="Mat_Warp_IMG_", prefix_we="Mat_Weft_IMG_",
-                        repeat_w=(1.0,1.0), repeat_we=(1.0,1.0), rotate_we_deg=0.0):
+def build_material_bank(paths, repeat_w=(1.0,1.0), repeat_we=(1.0,1.0), rotate_we_deg=0.0,
+                        prefix_w="Mat_Warp_IMG_", prefix_we="Mat_Weft_IMG_"):
     warp_mats=[]; weft_mats=[]
     for idx, p in enumerate(paths):
         if p is None: continue
@@ -401,127 +414,199 @@ def build_material_bank(paths, prefix_w="Mat_Warp_IMG_", prefix_we="Mat_Weft_IMG
         warp_mats.append(mw); weft_mats.append(me)
     return warp_mats, weft_mats
 
-def apply_pattern_materials(warp_objs, weft_objs, projector_obj,
-                            warp_mats, weft_mats,
-                            warp_index_fn, weft_index_fn):
-    # 곡선을 한 번만 메쉬로 변환
-    objs = [o for o in (warp_objs + weft_objs) if o is not None]
+def ensure_uv_project_for_objects(objs, projector):
     convert_to_mesh_if_needed(objs)
-
-    # UV Project 보장
-    for o in warp_objs:
+    for o in objs:
         if o and o.type=='MESH':
-            ensure_uv_project_modifier(o, projector_obj, uv_name="UVMap")
-    for o in weft_objs:
-        if o and o.type=='MESH':
-            ensure_uv_project_modifier(o, projector_obj, uv_name="UVMap")
+            ensure_uv_project_modifier(o, projector, uv_name="UVMap")
 
-    # 인덱스 함수에 따라 재질 할당
+def apply_materials_with_index_maps(warp_objs, weft_objs, warp_mats, weft_mats, warp_map, weft_map):
+    # warp_map, weft_map: 각 스트랜드별 재질 index 리스트
     for i, o in enumerate(warp_objs):
         if not o or o.type!='MESH': continue
-        idx = warp_index_fn(i) % max(1, len(warp_mats))
+        idx = warp_map[i] % max(1, len(warp_mats))
         mat = warp_mats[idx]
         if o.data.materials: o.data.materials[0]=mat
         else: o.data.materials.append(mat)
-
     for j, o in enumerate(weft_objs):
         if not o or o.type!='MESH': continue
-        idx = weft_index_fn(j) % max(1, len(weft_mats))
+        idx = weft_map[j] % max(1, len(weft_mats))
         mat = weft_mats[idx]
         if o.data.materials: o.data.materials[0]=mat
         else: o.data.materials.append(mat)
 
-# ---------- 메인 ----------
+# ------------------- 랜덤 패턴 생성 -------------------
+def make_index_sequence(pattern, need_n, count, rng):
+    """
+    pattern: "constant" | "alt" | "stripe" | "random" | "blocks"
+    """
+    seq = [0]*count
+    if need_n <= 0:
+        return seq
+    if pattern == "constant":
+        k = rng.randrange(need_n)
+        seq = [k]*count
+    elif pattern == "alt":
+        offset = rng.randrange(need_n)
+        for i in range(count):
+            seq[i] = (i + offset) % need_n
+    elif pattern == "stripe":
+        width = rng.randint(1, 8)  # 줄무늬 폭
+        offset = rng.randrange(need_n)
+        for i in range(count):
+            seq[i] = ((i // width) + offset) % need_n
+    elif pattern == "random":
+        for i in range(count):
+            seq[i] = rng.randrange(need_n)
+    elif pattern == "blocks":
+        # need_n개 순열을 블록 단위로 반복
+        perm = list(range(need_n))
+        rng.shuffle(perm)
+        block = []
+        # 블록 폭 무작위
+        block_w = rng.randint(2, max(2, need_n * 2))
+        while len(block) < count:
+            for p in perm:
+                block.extend([p]*block_w)
+                if len(block) >= count: break
+        seq = block[:count]
+    else:
+        # fallback
+        for i in range(count):
+            seq[i] = i % need_n
+    return seq
+
+# ================================================================
+#                             메인
+# ================================================================
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    # 초기 정리
+    # 메시만 제거(조명/카메라/기타는 유지)
     bpy.ops.object.select_all(action='DESELECT')
     bpy.ops.object.select_by_type(type='MESH'); bpy.ops.object.delete()
 
-    setup_cycles_engine(USE_CYCLES, SAMPLES, enable_gpu=True, device_type=CYCLES_DEVICE_TYPE, use_denoiser=USE_DENOISER)
+    setup_cycles_engine(USE_CYCLES, SAMPLES, enable_gpu=True, device_type=CYCLES_DEVICE, use_denoiser=USE_DENOISER)
 
-    # 직물 생성
-    result = generate_plain_weave(
-        warp_count=WARP_COUNT, weft_count=WEFT_COUNT,
-        warp_width=WARP_WIDTH, weft_width=WEFT_WIDTH,
-        warp_thick=WARP_THICK, weft_thick=WEFT_THICK,
-        spacing_warp=SPACING_WARP, spacing_weft=SPACING_WEFT,
-        crimp_amp=CRIMP_AMP,
-        auto_clearance=AUTO_CLEARANCE, clearance_margin=CLEARANCE_MARGIN,
-        steps_per_cell=STEPS_PER_CELL, bevel_res=BEVEL_RES, resolution_u=RESOLUTION_U,
-        warp_color=WARP_COLOR, weft_color=WEFT_COLOR
-    )
+    # 3D뷰 카메라 시점
+    try:
+        scr=bpy.context.screen
+        if scr:
+            for area in scr.areas:
+                if area.type=='VIEW_3D':
+                    for space in area.spaces:
+                        if space.type=='VIEW_3D':
+                            space.region_3d.view_perspective='CAMERA'; break
+    except Exception:
+        pass
 
-    # 위치 오프셋
-    all_objs = result["warp_objs"] + result["weft_objs"]
-    for o in all_objs:
-        if o: o.location = (o.location.x + OBJECT_OFFSET[0],
-                            o.location.y + OBJECT_OFFSET[1],
-                            o.location.z + OBJECT_OFFSET[2])
-    target = OBJECT_OFFSET
+    # 로그 파일 준비
+    csv_path = os.path.join(OUTPUT_DIR, "variations_log.csv")
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "idx","need_n","fabrics_used_indices","warp_width","warp_thick","weft_width","weft_thick",
+            "spacing_warp","spacing_weft","crimp_amp","repeat_w_u","repeat_w_v","repeat_we_u","repeat_we_v",
+            "rotate_weft_90","pattern_warp","pattern_weft"
+        ])
 
-    # 카메라/라이트
-    cam, _ = setup_camera_and_top_light(ADD_CAMERA_LIGHT, result["total_w"], result["total_h"], target)
-    bpy.context.scene.camera = cam
+    # 전역 RNG
+    base_rng = random.Random(GLOBAL_SEED) if GLOBAL_SEED is not None else random.Random()
 
-    # UV 프로젝터
-    projector = get_or_create_uv_projector(result["total_w"], result["total_h"], target) if UV_PROJECT_FROM_TOP else cam
+    for vi in range(VARIATION_COUNT):
+        rng = random.Random(base_rng.randrange(1<<30))  # 각 변형별 독립 난수
 
-    # 원단 재질 뱅크
-    rotate_we_deg = 90.0 if ROTATE_WEFT_90_DEG else 0.0
-    warp_mats_all, weft_mats_all = build_material_bank(
-        FABRIC_PATHS,
-        repeat_w=TEX_REPEAT_WARP_UV,
-        repeat_we=TEX_REPEAT_WEFT_UV,
-        rotate_we_deg=rotate_we_deg
-    )
+        # ---- 1) 사용할 원단 개수/순서 ----
+        max_n = min(len(FABRIC_PATHS), 4)
+        need_n = rng.randint(1, max_n)
+        chosen_indices = list(range(len(FABRIC_PATHS)))
+        rng.shuffle(chosen_indices)
+        chosen_indices = chosen_indices[:need_n]
+        chosen_paths = [FABRIC_PATHS[i] for i in chosen_indices]
 
-    # ===== 시나리오 정의 및 순차 실행 =====
-    scenarios = [
-        # 1) 하나의 원단으로 경사/위사 동일
-        ("1_one_fabric",           1, lambda i: 0,      lambda j: 0),
-        # 2) 두 개 원단: 경사=0번, 위사=1번
-        ("2_two_fabrics",          2, lambda i: 0,      lambda j: 1),
-        # 3) 세 개 원단 번갈아: 경사 i%3, 위사 j%3
-        ("3_three_fabrics_alt",    3, lambda i: i % 3,  lambda j: j % 3),
-        # 4) 네 개 원단 번갈아: 경사 i%4, 위사 j%4
-        ("4_four_fabrics_alt",     4, lambda i: i % 4,  lambda j: j % 4),
-    ]
+        # ---- 2) 치수 랜덤(폭/두께/간격/크림프) ----
+        warp_width = BASE_WARP_WIDTH  * rng.uniform(0.75, 1.35)
+        weft_width = BASE_WEFT_WIDTH  * rng.uniform(0.75, 1.35)
+        warp_thick = BASE_WARP_THICK  * rng.uniform(0.70, 1.30)
+        weft_thick = BASE_WEFT_THICK  * rng.uniform(0.70, 1.30)
 
-    # 3D뷰 카메라 시점 전환(편의)
-    scr=bpy.context.screen
-    if scr:
-        for area in scr.areas:
-            if area.type=='VIEW_3D':
-                for space in area.spaces:
-                    if space.type=='VIEW_3D':
-                        space.region_3d.view_perspective='CAMERA'; break
+        spacing_warp = BASE_SPACING_WARP * rng.uniform(0.90, 1.15)
+        spacing_weft = BASE_SPACING_WEFT * rng.uniform(0.90, 1.15)
+        crimp_amp    = BASE_CRIMP_AMP   * rng.uniform(0.75, 1.50)
 
-    for name, need_n, warp_idx_fn, weft_idx_fn in scenarios:
-        if need_n > len(FABRIC_PATHS):
-            print(f"[WARN] {name}: 필요한 원단 {need_n}개 > 제공 {len(FABRIC_PATHS)}개. 건너뜀.")
-            continue
+        # ---- 3) 직물 생성 (이번 변형에 맞춰 새로 생성) ----
+        result = generate_plain_weave(
+            warp_count=WARP_COUNT, weft_count=WEFT_COUNT,
+            warp_width=warp_width, weft_width=weft_width,
+            warp_thick=warp_thick, weft_thick=weft_thick,
+            spacing_warp=spacing_warp, spacing_weft=spacing_weft,
+            crimp_amp=crimp_amp,
+            auto_clearance=AUTO_CLEARANCE, clearance_margin=CLEARANCE_MARGIN,
+            steps_per_cell=STEPS_PER_CELL, bevel_res=BEVEL_RES, resolution_u=RESOLUTION_U,
+            warp_color=WARP_COLOR, weft_color=WEFT_COLOR
+        )
 
-        # 이번 시나리오에서 사용할 재질 세트 추출(앞에서 need_n개만)
-        warp_mats = warp_mats_all[:need_n]
-        weft_mats = weft_mats_all[:need_n]
+        # 위치 오프셋 적용
+        all_objs = result["warp_objs"] + result["weft_objs"]
+        for o in all_objs:
+            if o:
+                o.location = (o.location.x + OBJECT_OFFSET[0],
+                              o.location.y + OBJECT_OFFSET[1],
+                              o.location.z + OBJECT_OFFSET[2])
+        target = OBJECT_OFFSET
 
-        # 패턴 적용
-        apply_pattern_materials(result["warp_objs"], result["weft_objs"], projector,
-                                warp_mats, weft_mats, warp_idx_fn, weft_idx_fn)
+        # 카메라/라이트(라이트는 기본 False로)
+        cam, _ = setup_camera_and_top_light(ADD_CAMERA_LIGHT, result["total_w"], result["total_h"], target)
+        bpy.context.scene.camera = cam
 
-        # 렌더
+        # UV 프로젝터
+        projector = get_or_create_uv_projector(result["total_w"], result["total_h"], target) if UV_PROJECT_FROM_TOP else cam
+
+        # ---- 4) 텍스처 옵션 랜덤 ----
+        repeat_w = (rng.uniform(*TEX_REPEAT_RANGE), rng.uniform(*TEX_REPEAT_RANGE))
+        repeat_we = (rng.uniform(*TEX_REPEAT_RANGE), rng.uniform(*TEX_REPEAT_RANGE))
+        rotate_we_deg = 90.0 if (rng.random() < ROTATE_WEFT_90_PROB) else 0.0
+
+        # 재질 뱅크(이름은 고정 → 매 변형마다 노드가 갱신되어 중복 생성 방지)
+        warp_mats_all, weft_mats_all = build_material_bank(
+            chosen_paths, repeat_w=repeat_w, repeat_we=repeat_we, rotate_we_deg=rotate_we_deg
+        )
+
+        # ---- 5) 패턴 타입 랜덤 선택 & 인덱스 시퀀스 생성 ----
+        pat_types = ["constant", "alt", "stripe", "random", "blocks"]
+        pat_warp = rng.choice(pat_types)
+        pat_weft = rng.choice(pat_types)
+
+        warp_seq = make_index_sequence(pat_warp, need_n, WARP_COUNT, rng)
+        weft_seq = make_index_sequence(pat_weft, need_n, WEFT_COUNT, rng)
+
+        # 메시 변환 & UV Project 적용
+        ensure_uv_project_for_objects(result["warp_objs"] + result["weft_objs"], projector)
+        # 재질 할당
+        apply_materials_with_index_maps(result["warp_objs"], result["weft_objs"],
+                                        warp_mats_all, weft_mats_all, warp_seq, weft_seq)
+
+        # ---- 6) 렌더 & 로그 ----
+        fname = f"swatch_v{vi:02d}_n{need_n}.png"
+        out_path = os.path.join(OUTPUT_DIR, fname)
         if DO_RENDER:
-            out_path = os.path.join(OUTPUT_DIR, f"swatch_{name}.png")
             bpy.context.scene.render.filepath = out_path
             bpy.ops.render.render(write_still=True)
             print(f"[INFO] Render saved: {out_path}")
         else:
-            print(f"[INFO] Applied pattern: {name} (미렌더)")
+            print(f"[INFO] Prepared (미렌더): {out_path}")
 
-    print(f"[INFO] total size (m): {result['total_w']:.4f} × {result['total_h']:.4f}")
-    print(f"[INFO] WeaveCam loc: {tuple(round(v,4) for v in bpy.data.objects['WeaveCam'].location)}")
+        with open(csv_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                vi, need_n, chosen_indices,
+                round(warp_width,6), round(warp_thick,6), round(weft_width,6), round(weft_thick,6),
+                round(spacing_warp,6), round(spacing_weft,6), round(crimp_amp,6),
+                round(repeat_w[0],4), round(repeat_w[1],4), round(repeat_we[0],4), round(repeat_we[1],4),
+                int(rotate_we_deg==90.0), pat_warp, pat_weft
+            ])
 
-if __name__=="__main__":
+    print(f"[INFO] Done. CSV log: {csv_path}")
+
+# ================================================================
+if __name__ == "__main__":
     main()

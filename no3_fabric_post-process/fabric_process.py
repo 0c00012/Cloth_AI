@@ -1,11 +1,11 @@
-# Fabric megavariations generator (≈20 variants)hello 안녕안녕
+# Fabric megavariations generator (≈20 variants)hello
 # deps: pillow, numpy
 from PIL import Image, ImageFilter, ImageOps
 import numpy as np, os, math, itertools, pathlib, random
 
 # ------------ Paths ------------
 src_path   = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no2_blender_swatch_maker\render_output\batch\swatch_4_four_fabrics_alt.png"  # <<-- 여기에 너의 이미지 경로
-output_dir = r".\fabric_variations3"                       # 저장 폴더
+output_dir = r".\fabric_variation\fabric_variations0901_4"                       # 저장 폴더
 
 os.makedirs(output_dir, exist_ok=True)
 
