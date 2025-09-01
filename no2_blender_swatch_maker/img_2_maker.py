@@ -4,8 +4,8 @@ from math import sin, pi
 from mathutils import Matrix, Vector
 
 # =========================
-DO_RENDER   = False                   # 렌더 실행 여부
-OUTPUT_PATH = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no2_blender_swatch_maker\render_output\2img\rendered_2_tshirt.png"  # 저장 경로
+DO_RENDER   = True                   # 렌더 실행 여부
+OUTPUT_PATH = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no2_blender_swatch_maker\render_output\2img\rendered_2_tshirt2.png"  # 저장 경로
 
 WARP_IMAGE_PATH = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\cropped_tshirt\9a67ffca-6ad4-40f8-8224-5afc44bb4022_crop1.png"  # 경사 텍스처
 WEFT_IMAGE_PATH = r"C:\Users\_idal\PycharmProjects\Cloth_AI\data\fabric\fabric_0035_roughness_4k.jpg"  # 위사 텍스처
@@ -32,16 +32,23 @@ SAMPLES      = 256                   # Cycles 샘플 수
 USE_DENOISER = True                  # 노이즈 제거 사용
 CYCLES_DEVICE_TYPE = 'CUDA'          # 'CUDA' | 'OPTIX' | 'HIP'
 ADD_CAMERA_LIGHT = True              # 상단 단일 AREA 라이트 추가
-LIGHT_ENERGY      = 250.0            # 라이트 광량(W)
+LIGHT_ENERGY      = 200.0            # 라이트 광량(W)
 LIGHT_HEIGHT      = 1.0              # 라이트 높이(m)
 LIGHT_SIZE_X_MULT = 1.2              # 라이트 X 크기 배율(시료 폭 기준)
 LIGHT_SIZE_Y_MULT = 1.2              # 라이트 Y 크기 배율(시료 높이 기준)
+
 OBLIQUE_VIEW       = True            # 비스듬한 시점(True) / 탑다운(False)
-CAMERA_PERSPECTIVE = True            # 원근(True) / 직교(False)
-CAMERA_ELEV_DEG    = 60.0            # 카메라 고도(°) 90=정수직
-CAMERA_AZIMUTH_DEG = 0.0             # 카메라 방위각(°) 0=정면, 대각은 값 변경
-CAMERA_RADIUS_MULT = 2.2             # 시료 최대변 대비 카메라 거리 배수
+CAMERA_PERSPECTIVE = False            # 원근(True) / 직교(False)
+CAMERA_ELEV_DEG    = 60.0            # (수동 위치를 쓰지 않을 때) 기준 고도
+CAMERA_AZIMUTH_DEG = 0.0             # (수동 위치를 쓰지 않을 때) 기준 방위각
+CAMERA_RADIUS_MULT = 2.2             # (수동 위치를 쓰지 않을 때) 거리 배수
 CAMERA_LENS_MM     = 50.0            # 카메라 렌즈(mm, 원근일 때)
+
+# ▶ WeaveCam 수동 위치/회전 지정 (원하는 값으로 바꿔서 사용)
+WEAVECAM_LOCATION = (0.0, -5.5, 7.6820)   # 절대 좌표 (기본값: 이전 계산 결과와 유사)
+WEAVECAM_LOOK_AT_TARGET = True               # True면 target(OBJECT_OFFSET)을 바라보도록 회전 계산
+WEAVECAM_ROTATION_EULER_DEG = None           # 예: (60.0, 0.0, 0.0) 주면 look-at 대신 이 회전 사용
+
 UV_PROJECT_FROM_TOP = True           # 텍스처 UV 투영을 탑다운 카메라로 수행
 USE_IMAGE_TEXTURES = True            # 이미지 텍스처 사용
 TEX_REPEAT_WARP_UV = (1.0, 1.0)      # 경사 텍스처 반복(U, V)
@@ -290,6 +297,8 @@ def apply_images_to_warp_weft(warp_objs, weft_objs, projector_obj,
 def setup_camera_and_top_light(add_camera_light=True, total_w=1.0, total_h=1.0, target=(0.0,0.0,0.0)):
     scene = bpy.context.scene
     smax = max(float(total_w), float(total_h))
+
+    # --- WeaveCam 생성/준비 ---
     cam = bpy.data.objects.get("WeaveCam")
     if cam is None:
         cam_data = bpy.data.cameras.new("WeaveCam")
@@ -300,27 +309,44 @@ def setup_camera_and_top_light(add_camera_light=True, total_w=1.0, total_h=1.0, 
     if hasattr(cam.data, "shift_y"): cam.data.shift_y = 0.0
     cam.data.clip_start = 0.001
     cam.data.clip_end   = 100.0
-    if OBLIQUE_VIEW:
-        cam.data.type = 'PERSP' if CAMERA_PERSPECTIVE else 'ORTHO'
-        if not CAMERA_PERSPECTIVE:
-            cam.data.ortho_scale = smax * 1.15
-        if hasattr(cam.data, "lens"):
-            cam.data.lens = float(CAMERA_LENS_MM)
+
+    # 카메라 타입/렌즈
+    cam.data.type = 'PERSP' if (OBLIQUE_VIEW and CAMERA_PERSPECTIVE) else 'ORTHO'
+    if cam.data.type == 'ORTHO':
+        cam.data.ortho_scale = smax * 1.15
+    if hasattr(cam.data, "lens"):
+        cam.data.lens = float(CAMERA_LENS_MM)
+
+    # 위치 설정: 우선 수동 위치 사용, 없으면 기존 계산식 사용
+    if WEAVECAM_LOCATION is not None:
+        cam.location = (float(WEAVECAM_LOCATION[0]), float(WEAVECAM_LOCATION[1]), float(WEAVECAM_LOCATION[2]))
+    else:
         elev = math.radians(float(CAMERA_ELEV_DEG))
-        az = math.radians(float(CAMERA_AZIMUTH_DEG))
-        r = max(0.25, float(CAMERA_RADIUS_MULT) * smax) * 0.7
-        x = target[0] + r * math.sin(az) * math.cos(elev)
-        y = target[1] - r * math.cos(az) * math.cos(elev)
-        z = target[2] + r * math.sin(elev)
-        cam.location = (x, y, z)
+        az   = math.radians(float(CAMERA_AZIMUTH_DEG))
+        r    = max(0.25, float(CAMERA_RADIUS_MULT) * smax) * 0.7
+        base_x = target[0] + r * math.sin(az) * math.cos(elev)
+        base_y = target[1] - r * math.cos(az) * math.cos(elev)
+        base_z = target[2] + r * math.sin(elev)
+        cam.location = (base_x, base_y, base_z)
+
+    # 회전 설정: 명시 회전 > look-at(target) > 유지
+    if WEAVECAM_ROTATION_EULER_DEG is not None:
+        rx, ry, rz = [math.radians(float(a)) for a in WEAVECAM_ROTATION_EULER_DEG]
+        cam.rotation_euler = (rx, ry, rz)
+    elif WEAVECAM_LOOK_AT_TARGET:
         forward = (Vector(target) - Vector(cam.location)).normalized()
         world_up = Vector((0.0, 0.0, 1.0))
         right = forward.cross(world_up).normalized()
+        if right.length < 1e-6:
+            world_up = Vector((0.0, 1.0, 0.0))
+            right = forward.cross(world_up).normalized()
         up = right.cross(forward).normalized()
         rot_mat = Matrix(((right.x,  up.x,  -forward.x),
                           (right.y,  up.y,  -forward.y),
                           (right.z,  up.z,  -forward.z)))
         cam.rotation_euler = rot_mat.to_euler('XYZ')
+
+    # --- 라이트 설정 ---
     light = None
     if add_camera_light:
         keep_name = "Light"
@@ -344,6 +370,9 @@ def setup_camera_and_top_light(add_camera_light=True, total_w=1.0, total_h=1.0, 
             light.data.use_contact_shadow = True
         except Exception:
             pass
+
+    # 렌더 메인 카메라 고정
+    scene.camera = cam
     return cam, light
 
 def get_or_create_uv_projector(total_w, total_h, target=(0.0,0.0,0.0), name="UVProjectorTop"):
@@ -432,9 +461,12 @@ def apply_object_offset(objs, offset=(0.0,0.0,0.0)):
         if o: o.location = (o.location.x + ox, o.location.y + oy, o.location.z + oz)
 
 def main():
+    # 초기 정리
     bpy.ops.object.select_all(action='DESELECT')
     bpy.ops.object.select_by_type(type='MESH')
     bpy.ops.object.delete()
+
+    # 렌더 엔진/장치 설정
     setup_cycles_engine(
         use_cycles=USE_CYCLES,
         samples=SAMPLES,
@@ -442,6 +474,8 @@ def main():
         device_type=CYCLES_DEVICE_TYPE,
         use_denoiser=USE_DENOISER
     )
+
+    # 직물 생성
     result = generate_plain_weave(
         warp_count=WARP_COUNT, weft_count=WEFT_COUNT,
         warp_width=WARP_WIDTH, weft_width=WEFT_WIDTH,
@@ -452,10 +486,20 @@ def main():
         steps_per_cell=STEPS_PER_CELL, bevel_res=BEVEL_RES, resolution_u=RESOLUTION_U,
         warp_color=WARP_COLOR, weft_color=WEFT_COLOR
     )
+
+    # 오브젝트 오프셋 적용
     all_curve_objs = result["warp_objs"] + result["weft_objs"]
     apply_object_offset(all_curve_objs, OBJECT_OFFSET)
     target = OBJECT_OFFSET
-    setup_camera_and_top_light(add_camera_light=ADD_CAMERA_LIGHT, total_w=result["total_w"], total_h=result["total_h"], target=target)
+
+    # 카메라/라이트 세팅 (scene.camera 고정 포함)
+    cam, _ = setup_camera_and_top_light(
+        add_camera_light=ADD_CAMERA_LIGHT,
+        total_w=result["total_w"], total_h=result["total_h"], target=target
+    )
+    bpy.context.scene.camera = cam  # 안전장치(중복 지정)
+
+    # 텍스처 적용 (필요 시)
     if USE_IMAGE_TEXTURES:
         if UV_PROJECT_FROM_TOP:
             projector = get_or_create_uv_projector(result["total_w"], result["total_h"], target=target)
@@ -471,6 +515,8 @@ def main():
             weft_repeat=TEX_REPEAT_WEFT_UV,
             rotate_weft_90=ROTATE_WEFT_90_DEG
         )
+
+    # 3D뷰를 카메라 시점으로 전환(편의)
     scr = bpy.context.screen
     if scr:
         for area in scr.areas:
@@ -479,7 +525,10 @@ def main():
                     if space.type == 'VIEW_3D':
                         space.region_3d.view_perspective = 'CAMERA'
                         break
+
     print(f"[INFO] total size (m): {result['total_w']:.4f} × {result['total_h']:.4f}")
+    print(f"[INFO] WeaveCam loc: {tuple(round(v, 4) for v in bpy.data.objects['WeaveCam'].location)}")
+    print(f"[INFO] WeaveCam rot(deg): {tuple(round(math.degrees(a), 2) for a in bpy.data.objects['WeaveCam'].rotation_euler)}")
 
 if __name__ == "__main__":
     main()

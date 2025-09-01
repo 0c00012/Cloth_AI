@@ -1,4 +1,4 @@
-# Plain Weave Swatch Generator — 4이미지 번갈아 적용(경사/위사), UV Project from camera
+# Plain Weave Swatch Generator — 4이미지 번갈아 적용(경사/위사), UV Project from camera 안녕안녕
 # Blender 3.x / 4.x
 
 import bpy
