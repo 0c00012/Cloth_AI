@@ -11,12 +11,12 @@ from mathutils import Matrix, Vector
 #                      사용자 설정 (필수 확인)
 # ================================================================
 DO_RENDER        = True
-OUTPUT_DIR       = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no2_blender_swatch_maker\render_output\ramdom_batch"
+OUTPUT_DIR       = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no2_blender_swatch_maker\render_output\ramdom_batch_0922"
 FABRIC_PATHS     = [
-    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt\KakaoTalk_20230321_093636783_18_crop3.png",
-    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt\KakaoTalk_20230321_093636783_14_crop3.png",
-    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt\KakaoTalk_20230321_093636783_21_crop4.png",
-    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\08199_cropped_tshirt\KakaoTalk_20230321_093727482_14_crop5.png",
+    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\0819_JH_crop\KakaoTalk_20230321_093803765_17_crop4.png",
+    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\0819_JH_crop\KakaoTalk_20230321_093636783_01_crop1.png",
+    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\0819_JH_crop\KakaoTalk_20230321_093803765_11_crop3.png",
+    r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\0819_JH_crop\KakaoTalk_20230321_093803765_01_crop5.png",
 ]
 
 VARIATION_COUNT  = 50
