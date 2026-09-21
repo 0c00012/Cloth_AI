@@ -14,15 +14,20 @@ Method
 4. Grid-origin optimization (3.4.5): the whole grid is translated by
    (ox, oy) in [0, 375] x [0, 375]  ->  141,376 origins. For each origin the number
    of valid cells is counted; the origin with the largest count is selected.
-   Ties are broken by the smaller y, then the smaller x.
-5. All valid cells of the selected grid are saved in row-major order.
+5. Tie-break (many origins reach the same maximum): among the maximum-count origins
+   the one whose worst cell keeps the largest margin to the mask boundary is chosen
+   (max-min cell margin, then max mean margin, then smallest y, then smallest x).
+   Cells therefore sit as far as possible from hems, necklines and sleeve edges.
+6. All valid cells of the selected grid are saved in row-major order and the
+   placement is verified pixel-wise. A maximality check confirms that no further
+   376 x 376 px square fits in the remaining garment area.
 
 This is an exhaustive search over the translated regular-grid family. It is not a
 global optimum over all free (non-grid) placements, and the code makes no such claim.
 
 Inputs : work/01_segmented/*_nobg.png   (RGBA from step 1)
 Outputs: work/02_swatches/<garment>/<garment>_crop_NN.png
-         work/02_swatches/<garment>_placement.json     (origin, coordinates, counts)
+         work/02_swatches/<garment>_placement.json     (origin, coordinates, counts, bounds)
          work/02_swatches/<garment>_grid_origin_counts.npy (376 x 376 count map)
          work/02_swatches/<garment>_layout.png          (real-image overlay figure)
          work/02_swatches/extraction_summary.csv
@@ -31,19 +36,21 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
+from scipy.ndimage import distance_transform_edt, minimum_filter
 
 from pipeline_config import ALPHA_THRESHOLD, SEGMENT_DIR, SWATCH_DIR, SWATCH_PX, garment_id
 
 
 # --------------------------------------------------------------------------- core
-def garment_mask(rgba: np.ndarray) -> np.ndarray:
+def garment_mask(rgba: np.ndarray, threshold: int = ALPHA_THRESHOLD) -> np.ndarray:
     """Binary garment mask from the RGBA alpha channel (alpha > threshold)."""
-    return rgba[:, :, 3] > ALPHA_THRESHOLD
+    return rgba[:, :, 3] > threshold
 
 
 def valid_top_left(mask: np.ndarray, size: int) -> np.ndarray:
@@ -80,14 +87,43 @@ def grid_cells(valid: np.ndarray, size: int, origin: tuple[int, int]) -> list[tu
     return [(int(c * size + ox), int(r * size + oy)) for r, c in rc]
 
 
-def optimise_grid_origin(valid: np.ndarray, size: int):
+def cell_margin_map(mask: np.ndarray, size: int) -> np.ndarray:
+    """margin[y, x] = smallest distance (px) from any pixel of the square at (x, y) to the
+    mask boundary, i.e. the minimum of the Euclidean distance transform over the square."""
+    dt = distance_transform_edt(mask)
+    m = minimum_filter(dt, size=size, mode="constant", cval=0.0, origin=-(size // 2))
+    return m[: mask.shape[0] - size + 1, : mask.shape[1] - size + 1]
+
+
+def optimise_grid_origin(valid: np.ndarray, size: int, margin: np.ndarray | None = None):
+    """Return (cells, origin, counts, tie_info).
+
+    Primary criterion: maximum number of valid cells.
+    Secondary (when `margin` is given): maximise the minimum cell margin, then the mean
+    margin; remaining ties are broken by the smaller y, then the smaller x.
+    """
     counts = grid_origin_counts(valid, size)
-    oy, ox = np.unravel_index(int(np.argmax(counts)), counts.shape)   # first max: min y, then min x
-    origin = (int(ox), int(oy))
-    return grid_cells(valid, size, origin), origin, counts
+    best = int(counts.max())
+    ties = np.argwhere(counts == best)                      # (oy, ox), row-major = y then x
+    info = {"max_count": best, "tied_origins": int(len(ties))}
+    if margin is None or len(ties) == 1:
+        oy, ox = ties[0]
+        origin = (int(ox), int(oy))
+        return grid_cells(valid, size, origin), origin, counts, info
+    scored = []
+    for oy, ox in ties:
+        cells = grid_cells(valid, size, (int(ox), int(oy)))
+        m = np.array([margin[y, x] for x, y in cells])
+        scored.append((float(m.min()), float(m.mean()), -int(oy), -int(ox), (int(ox), int(oy))))
+    scored.sort(reverse=True)
+    origin = scored[0][4]
+    info.update({"min_cell_margin_px": scored[0][0], "mean_cell_margin_px": scored[0][1],
+                 "first_tie_origin_xy": [int(ties[0][1]), int(ties[0][0])],
+                 "first_tie_min_margin_px": float(min(margin[y, x] for x, y in grid_cells(valid, size, (int(ties[0][1]), int(ties[0][0])))))})
+    return grid_cells(valid, size, origin), origin, counts, info
 
 
-def verify(mask: np.ndarray, cells: list[tuple[int, int]], size: int) -> None:
+def verify(mask: np.ndarray, cells: list[tuple[int, int]], size: int) -> np.ndarray:
     """Independent pixel-level check: containment, bounds, non-overlap, area identity."""
     h, w = mask.shape
     occupied = np.zeros_like(mask)
@@ -97,6 +133,12 @@ def verify(mask: np.ndarray, cells: list[tuple[int, int]], size: int) -> None:
         assert not occupied[y:y + size, x:x + size].any(), (x, y, "overlap")
         occupied[y:y + size, x:x + size] = True
     assert int(occupied.sum()) == len(cells) * size * size
+    return occupied
+
+
+def remaining_capacity(mask: np.ndarray, occupied: np.ndarray, size: int) -> int:
+    """Number of top-left positions where another square would still fit (0 = maximal)."""
+    return int(valid_top_left(mask & ~occupied, size).sum())
 
 
 # ------------------------------------------------------------------------ outputs
@@ -111,18 +153,22 @@ def draw_layout(rgba: np.ndarray, cells, size, origin, label, path: Path) -> Non
     im.save(path)
 
 
-def extract_one(nobg_path: Path, out_dir: Path, size: int) -> dict:
+def extract_one(nobg_path: Path, out_dir: Path, size: int, threshold: int, tie_break: bool) -> dict:
     stem = nobg_path.stem.replace("_nobg", "")
     label = garment_id(stem)
     with Image.open(nobg_path) as im:
         rgba = np.array(im.convert("RGBA"))
-    mask = garment_mask(rgba)
+    mask = garment_mask(rgba, threshold)
     valid = valid_top_left(mask, size)
-    cells, origin, counts = optimise_grid_origin(valid, size)
-    verify(mask, cells, size)
+    margin = cell_margin_map(mask, size) if tie_break else None
+    cells, origin, counts, tie = optimise_grid_origin(valid, size, margin)
+    occupied = verify(mask, cells, size)
+    leftover = remaining_capacity(mask, occupied, size)
 
     swatch_dir = out_dir / stem
     swatch_dir.mkdir(parents=True, exist_ok=True)
+    for old in swatch_dir.glob(f"{stem}_crop_*.png"):
+        old.unlink()
     for i, (x, y) in enumerate(cells, 1):
         Image.fromarray(rgba[y:y + size, x:x + size]).save(swatch_dir / f"{stem}_crop_{i:02d}.png")
 
@@ -132,14 +178,18 @@ def extract_one(nobg_path: Path, out_dir: Path, size: int) -> dict:
     fg = int(mask.sum())
     record = {
         "garment": label, "stem": stem, "source": nobg_path.name,
+        "source_sha256": hashlib.sha256(nobg_path.read_bytes()).hexdigest(),
         "image_width": int(mask.shape[1]), "image_height": int(mask.shape[0]),
-        "swatch_px": size, "alpha_threshold": ALPHA_THRESHOLD,
+        "swatch_px": size, "alpha_threshold": threshold,
         "foreground_px": fg, "valid_top_left_positions": int(valid.sum()),
         "grid_origins_tested": int(counts.size),
         "grid_origin_xy": list(origin), "count": len(cells),
         "fixed_origin_count": int(counts[0, 0]),
+        "origin_count_mean": float(counts.mean()), "origin_count_min": int(counts.min()),
+        "area_upper_bound": fg // (size * size),
+        "remaining_positions_after_grid": leftover,
         "coverage_pct_of_mask": 100.0 * len(cells) * size * size / fg,
-        "cells_xy_row_major": cells,
+        "tie_break": tie, "cells_xy_row_major": cells,
     }
     (out_dir / f"{stem}_placement.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     return record
@@ -150,6 +200,8 @@ def main() -> None:
     ap.add_argument("--input", type=Path, default=SEGMENT_DIR, help="folder with *_nobg.png")
     ap.add_argument("--output", type=Path, default=SWATCH_DIR)
     ap.add_argument("--size", type=int, default=SWATCH_PX, help="swatch side in px (default 376 = 10 cm)")
+    ap.add_argument("--threshold", type=int, default=ALPHA_THRESHOLD, help="alpha > threshold is garment")
+    ap.add_argument("--no-tie-break", action="store_true", help="use plain first-maximum (smallest y, then x) selection")
     args = ap.parse_args()
 
     files = sorted(args.input.glob("*_nobg.png"))
@@ -158,17 +210,23 @@ def main() -> None:
     args.output.mkdir(parents=True, exist_ok=True)
     rows = []
     for f in files:
-        r = extract_one(f, args.output, args.size)
+        r = extract_one(f, args.output, args.size, args.threshold, not args.no_tie_break)
         rows.append(r)
+        t = r["tie_break"]
         print(f"{r['garment']} {r['stem']}: {r['count']} swatches at origin {tuple(r['grid_origin_xy'])} "
-              f"(fixed origin (0,0): {r['fixed_origin_count']}), mask coverage {r['coverage_pct_of_mask']:.2f}%")
-    keys = ["garment", "stem", "image_width", "image_height", "foreground_px", "grid_origins_tested",
-            "grid_origin_xy", "count", "fixed_origin_count", "coverage_pct_of_mask"]
+              f"(bound {r['area_upper_bound']}, ties {t['tied_origins']}, min margin "
+              f"{t.get('min_cell_margin_px', float('nan')):.0f} px, leftover positions {r['remaining_positions_after_grid']})")
+    keys = ["garment", "stem", "image_width", "image_height", "foreground_px", "alpha_threshold", "grid_origins_tested",
+            "grid_origin_xy", "count", "fixed_origin_count", "origin_count_mean", "origin_count_min",
+            "area_upper_bound", "remaining_positions_after_grid", "coverage_pct_of_mask"]
     with (args.output / "extraction_summary.csv").open("w", newline="", encoding="utf-8-sig") as fh:
-        w = csv.DictWriter(fh, fieldnames=keys)
+        w = csv.DictWriter(fh, fieldnames=keys + ["tied_origins", "min_cell_margin_px"])
         w.writeheader()
         for r in rows:
-            w.writerow({k: (f"({r[k][0]}, {r[k][1]})" if k == "grid_origin_xy" else r[k]) for k in keys})
+            row = {k: (f"({r[k][0]}, {r[k][1]})" if k == "grid_origin_xy" else r[k]) for k in keys}
+            row["tied_origins"] = r["tie_break"]["tied_origins"]
+            row["min_cell_margin_px"] = r["tie_break"].get("min_cell_margin_px", "")
+            w.writerow(row)
     print(f"total {sum(r['count'] for r in rows)} swatches -> {args.output}")
 
 

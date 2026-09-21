@@ -2,6 +2,7 @@
   "garment": "G04",
   "stem": "stripe_1_rotate",
   "source": "stripe_1_rotate_nobg.png",
+  "source_sha256": "d32f071ff9f264dc9b0c891e89bc53e0c368a910e07f5f94329c4559f6590c9b",
   "image_width": 3252,
   "image_height": 2433,
   "swatch_px": 376,
@@ -15,7 +16,15 @@
   ],
   "count": 21,
   "fixed_origin_count": 20,
+  "origin_count_mean": 16.489298042100497,
+  "origin_count_min": 13,
+  "area_upper_bound": 28,
+  "remaining_positions_after_grid": 0,
   "coverage_pct_of_mask": 72.73169125601669,
+  "tie_break": {
+    "max_count": 21,
+    "tied_origins": 1
+  },
   "cells_xy_row_major": [
     [
       1168,

@@ -2,6 +2,7 @@
   "garment": "G01",
   "stem": "all-over pattern_rotate",
   "source": "all-over pattern_rotate_nobg.png",
+  "source_sha256": "4a6fcec42972d8c70db207712d25a6a575dd6d40bccfeb9f4e38b3912ea626c3",
   "image_width": 3321,
   "image_height": 2373,
   "swatch_px": 376,
@@ -10,96 +11,111 @@
   "valid_top_left_positions": 2301195,
   "grid_origins_tested": 141376,
   "grid_origin_xy": [
-    34,
-    147
+    27,
+    154
   ],
   "count": 21,
   "fixed_origin_count": 16,
+  "origin_count_mean": 16.277126244907198,
+  "origin_count_min": 12,
+  "area_upper_bound": 28,
+  "remaining_positions_after_grid": 0,
   "coverage_pct_of_mask": 73.41890351987846,
+  "tie_break": {
+    "max_count": 21,
+    "tied_origins": 165,
+    "min_cell_margin_px": 5.0,
+    "mean_cell_margin_px": 176.32785594918127,
+    "first_tie_origin_xy": [
+      34,
+      147
+    ],
+    "first_tie_min_margin_px": 1.0
+  },
   "cells_xy_row_major": [
     [
-      786,
-      147
+      779,
+      154
     ],
     [
-      1162,
-      147
+      1155,
+      154
     ],
     [
-      1538,
-      147
+      1531,
+      154
     ],
     [
-      410,
-      523
+      403,
+      530
     ],
     [
-      786,
-      523
+      779,
+      530
     ],
     [
-      1162,
-      523
+      1155,
+      530
     ],
     [
-      1538,
-      523
+      1531,
+      530
     ],
     [
-      1914,
-      523
+      1907,
+      530
     ],
     [
-      2290,
-      523
+      2283,
+      530
     ],
     [
-      786,
-      899
+      779,
+      906
     ],
     [
-      1162,
-      899
+      1155,
+      906
     ],
     [
-      1538,
-      899
+      1531,
+      906
     ],
     [
-      1914,
-      899
+      1907,
+      906
     ],
     [
-      786,
-      1275
+      779,
+      1282
     ],
     [
-      1162,
-      1275
+      1155,
+      1282
     ],
     [
-      1538,
-      1275
+      1531,
+      1282
     ],
     [
-      1914,
-      1275
+      1907,
+      1282
     ],
     [
-      786,
-      1651
+      779,
+      1658
     ],
     [
-      1162,
-      1651
+      1155,
+      1658
     ],
     [
-      1538,
-      1651
+      1531,
+      1658
     ],
     [
-      1914,
-      1651
+      1907,
+      1658
     ]
   ]
 }
