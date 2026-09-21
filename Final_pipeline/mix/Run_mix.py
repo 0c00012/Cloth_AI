@@ -1,191 +1,320 @@
 # -*- coding: utf-8 -*-
-"""
-[대형 직물 생성 - 믹스매치(Mix & Match) 모드]
-- 폴더 A (경사) + 폴더 B (위사) 조합으로 랜덤 샘플 생성
-- 두 개의 텍스처를 각각 생성하여 블렌더로 전달
-"""
+"""Build mixed weave renders by pairing two swatch folders."""
 
-import os
+from __future__ import annotations
+
+import argparse
+import itertools
 import math
+import os
 import random
-import subprocess
 import shutil
-from PIL import Image
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Sequence
 
-# ==========================================
-# [사용자 설정 CONFIG]
-# ==========================================
-
-# 1. 루트 폴더 (이 안의 하위 폴더들을 랜덤 조합)
-ROOT_INPUT_DIR = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no4_Scanning\1117_max_packing"
-
-# 2. 결과 저장 경로
-BASE_OUTPUT_DIR = r"C:\Users\_idal\PycharmProjects\Cloth_AI\Result_Large_Weave_Mix"
-
-# 3. 생성할 랜덤 샘플 개수
-NUM_SAMPLES = 10
-
-# 4. 설정
-BLENDER_SCRIPT = "Mix_Blender.py"
-SWATCH_RES_PX = 376
-RANDOM_SEED = 42  # 랜덤 조합을 고정하려면 숫자 입력, 매번 다르게 하려면 None
+from PIL import Image, UnidentifiedImageError
 
 
-# ==========================================
-# [기능]
-# ==========================================
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+PIPELINE_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_ROOT_INPUT_DIR = PIPELINE_DIR / "work" / "max_packing"
+DEFAULT_BASE_OUTPUT_DIR = PIPELINE_DIR / "outputs" / "mix"
+DEFAULT_SWATCH_RES_PX = 376
+DEFAULT_NUM_SAMPLES = 10
+DEFAULT_RANDOM_SEED = 42
+DEFAULT_BLENDER_SCRIPT = Path(__file__).resolve().with_name("Mix_Blender.py")
 
-def calculate_optimal_grid(num_files):
-    if num_files == 0: return 0, 0
-    cols = int(math.sqrt(num_files))
-    if cols == 0: cols = 1
-    rows = num_files // cols
+
+@dataclass(frozen=True)
+class PipelineConfig:
+    root_input_dir: Path
+    base_output_dir: Path
+    blender_script: Path
+    blender_executable: Path | None = None
+    num_samples: int = DEFAULT_NUM_SAMPLES
+    swatch_res_px: int = DEFAULT_SWATCH_RES_PX
+    random_seed: int | None = DEFAULT_RANDOM_SEED
+
+    def validate(self) -> "PipelineConfig":
+        if not self.root_input_dir.exists():
+            raise FileNotFoundError(f"Input root does not exist: {self.root_input_dir}")
+        if not self.root_input_dir.is_dir():
+            raise NotADirectoryError(f"Input root is not a directory: {self.root_input_dir}")
+        if not self.blender_script.exists():
+            raise FileNotFoundError(f"Blender script does not exist: {self.blender_script}")
+        if self.num_samples <= 0:
+            raise ValueError("num_samples must be greater than 0")
+        if self.swatch_res_px <= 0:
+            raise ValueError("swatch_res_px must be greater than 0")
+        if self.blender_executable and not self.blender_executable.exists():
+            raise FileNotFoundError(
+                f"Requested Blender executable does not exist: {self.blender_executable}"
+            )
+
+        self.base_output_dir.mkdir(parents=True, exist_ok=True)
+        return self
+
+
+def parse_args() -> PipelineConfig:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root-input-dir", type=Path, default=DEFAULT_ROOT_INPUT_DIR)
+    parser.add_argument("--base-output-dir", type=Path, default=DEFAULT_BASE_OUTPUT_DIR)
+    parser.add_argument("--blender-script", type=Path, default=DEFAULT_BLENDER_SCRIPT)
+    parser.add_argument("--blender-executable", type=Path, default=None)
+    parser.add_argument("--num-samples", type=int, default=DEFAULT_NUM_SAMPLES)
+    parser.add_argument("--swatch-res-px", type=int, default=DEFAULT_SWATCH_RES_PX)
+    parser.add_argument("--seed", type=int, default=DEFAULT_RANDOM_SEED)
+    parser.add_argument(
+        "--randomize",
+        action="store_true",
+        help="Disable deterministic sampling by ignoring the seed.",
+    )
+    args = parser.parse_args()
+
+    return PipelineConfig(
+        root_input_dir=args.root_input_dir.resolve(),
+        base_output_dir=args.base_output_dir.resolve(),
+        blender_script=args.blender_script.resolve(),
+        blender_executable=args.blender_executable.resolve()
+        if args.blender_executable
+        else None,
+        num_samples=args.num_samples,
+        swatch_res_px=args.swatch_res_px,
+        random_seed=None if args.randomize else args.seed,
+    )
+
+
+def calculate_optimal_grid(num_files: int) -> tuple[int, int]:
+    if num_files <= 0:
+        return 0, 0
+
+    best_cols, best_rows = 1, num_files
+    best_score = (abs(best_rows - best_cols), best_cols * best_rows - num_files, best_cols * best_rows)
+
+    for cols in range(1, int(math.sqrt(num_files)) + 2):
+        rows = math.ceil(num_files / cols)
+        score = (abs(rows - cols), cols * rows - num_files, cols * rows)
+        if score < best_score:
+            best_cols, best_rows, best_score = cols, rows, score
+
+    return best_cols, best_rows
+
+
+def collect_subfolders(root_dir: Path) -> list[Path]:
+    return sorted(path for path in root_dir.iterdir() if path.is_dir())
+
+
+def collect_image_paths(input_dir: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in input_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+    )
+
+
+def filter_readable_images(image_paths: Sequence[Path]) -> tuple[list[Path], list[str]]:
+    readable: list[Path] = []
+    failures: list[str] = []
+
+    for image_path in image_paths:
+        try:
+            with Image.open(image_path) as image:
+                image.verify()
+            readable.append(image_path)
+        except (OSError, UnidentifiedImageError) as exc:
+            failures.append(f"{image_path.name}: {exc}")
+
+    return readable, failures
+
+
+def create_texture_from_folder(
+    input_dir: Path,
+    save_path: Path,
+    swatch_res_px: int,
+    rng: random.Random,
+    req_grid: tuple[int, int] | None = None,
+) -> tuple[int, int]:
+    image_paths = collect_image_paths(input_dir)
+    if not image_paths:
+        raise FileNotFoundError(f"No supported image files found in {input_dir}")
+
+    readable_images, failures = filter_readable_images(image_paths)
+    if failures:
+        print(f"   Skipped {len(failures)} unreadable images in {input_dir.name}")
+    if not readable_images:
+        raise RuntimeError(f"All images in {input_dir} were unreadable")
+
+    if req_grid is None:
+        cols, rows = calculate_optimal_grid(len(readable_images))
+    else:
+        cols, rows = req_grid
+
+    if cols <= 0 or rows <= 0:
+        raise ValueError(f"Invalid grid size requested: {cols}x{rows}")
+
+    target_count = cols * rows
+    chosen_images = list(readable_images)
+    rng.shuffle(chosen_images)
+    tiled_images = [chosen_images[index % len(chosen_images)] for index in range(target_count)]
+
+    canvas = Image.new("RGBA", (cols * swatch_res_px, rows * swatch_res_px))
+    for index, image_path in enumerate(tiled_images):
+        row, col = divmod(index, cols)
+        with Image.open(image_path) as image:
+            patch = image.convert("RGBA")
+            if patch.size != (swatch_res_px, swatch_res_px):
+                patch = patch.resize((swatch_res_px, swatch_res_px), Image.LANCZOS)
+            canvas.paste(patch, (col * swatch_res_px, row * swatch_res_px))
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(save_path)
     return cols, rows
 
 
-def create_texture_from_folder(input_dir, save_path, req_cols=None, req_rows=None):
-    """
-    폴더의 이미지를 스티칭하여 텍스처 생성.
-    req_cols, req_rows가 주어지면 그 크기에 맞춤 (안 주어지면 자동 계산)
-    """
-    valid_ext = ('.png', '.jpg', '.jpeg')
-    files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.lower().endswith(valid_ext)]
-    num_files = len(files)
+def resolve_blender_executable(requested_path: Path | None = None) -> Path:
+    if requested_path is not None:
+        return requested_path
 
-    if num_files == 0:
-        return False, 0, 0
+    env_blender = os.environ.get("BLENDER_EXE")
+    if env_blender:
+        env_path = Path(env_blender)
+        if env_path.exists():
+            return env_path
 
-    # 그리드 계산 (요청된 크기가 있으면 그걸 따르고, 없으면 자동 계산)
-    if req_cols and req_rows:
-        cols, rows = req_cols, req_rows
-    else:
-        cols, rows = calculate_optimal_grid(num_files)
+    shell_blender = shutil.which("blender")
+    if shell_blender:
+        return Path(shell_blender)
 
-    target_count = cols * rows
+    install_root = Path(r"C:\Program Files\Blender Foundation")
+    if install_root.exists():
+        for candidate_dir in sorted(install_root.iterdir(), reverse=True):
+            blender_exe = candidate_dir / "blender.exe"
+            if blender_exe.exists():
+                return blender_exe
 
-    # 캔버스 준비
-    total_w = cols * SWATCH_RES_PX
-    total_h = rows * SWATCH_RES_PX
-    master_img = Image.new("RGBA", (total_w, total_h))
-
-    # 랜덤 섞기
-    random.shuffle(files)
-
-    # 이미지가 부족하면 반복해서 채움
-    selected_files = []
-    while len(selected_files) < target_count:
-        selected_files.extend(files)
-    selected_files = selected_files[:target_count]
-
-    idx = 0
-    for r in range(rows):
-        for c in range(cols):
-            path = selected_files[idx]
-            try:
-                patch = Image.open(path).convert("RGBA")
-                if patch.size != (SWATCH_RES_PX, SWATCH_RES_PX):
-                    patch = patch.resize((SWATCH_RES_PX, SWATCH_RES_PX), Image.LANCZOS)
-                master_img.paste(patch, (c * SWATCH_RES_PX, r * SWATCH_RES_PX))
-            except:
-                pass
-            idx += 1
-
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    master_img.save(save_path)
-    return True, cols, rows
+    raise FileNotFoundError("Blender executable could not be found automatically")
 
 
-def find_blender_auto():
-    path = shutil.which("blender")
-    if path: return path
-    pf = r"C:\Program Files\Blender Foundation"
-    if os.path.exists(pf):
-        dirs = sorted([d for d in os.listdir(pf) if "Blender" in d], reverse=True)
-        for d in dirs:
-            exe = os.path.join(pf, d, "blender.exe")
-            if os.path.exists(exe): return exe
-    return None
-
-
-def run_blender_mix(warp_tex, weft_tex, cols, rows, output_path):
-    blender_exe = find_blender_auto()
-    if not blender_exe:
-        print("   ❌ 블렌더 없음")
-        return
-
-    script_path = os.path.join(os.getcwd(), BLENDER_SCRIPT)
-
-    cmd = [
-        blender_exe, "-b", "-P", script_path,
+def run_blender_mix(
+    config: PipelineConfig,
+    warp_texture: Path,
+    weft_texture: Path,
+    cols: int,
+    rows: int,
+    output_path: Path,
+) -> None:
+    blender_executable = resolve_blender_executable(config.blender_executable)
+    command = [
+        str(blender_executable),
+        "-b",
+        "-P",
+        str(config.blender_script),
         "--",
-        warp_tex,  # 1. 경사 텍스처
-        weft_tex,  # 2. 위사 텍스처
+        str(warp_texture),
+        str(weft_texture),
         str(cols),
         str(rows),
-        output_path
-    ]
-    subprocess.run(cmd)
-
-
-def main():
-    if not os.path.exists(ROOT_INPUT_DIR):
-        print(f"❌ 경로 없음: {ROOT_INPUT_DIR}")
-        return
-
-    # 폴더 리스트 확보
-    all_folders = [
-        os.path.join(ROOT_INPUT_DIR, d)
-        for d in os.listdir(ROOT_INPUT_DIR)
-        if os.path.isdir(os.path.join(ROOT_INPUT_DIR, d))
+        str(output_path),
     ]
 
-    if len(all_folders) < 2:
-        print("❌ 폴더가 최소 2개 이상 있어야 섞을 수 있습니다.")
-        return
+    completed = subprocess.run(command, cwd=str(config.blender_script.parent), check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"Blender render failed with exit code {completed.returncode} for {output_path.name}"
+        )
 
-    print(f"========== 믹스매치 생성 시작 (총 {NUM_SAMPLES}개 예정) ==========")
 
-    if RANDOM_SEED is not None:
-        random.seed(RANDOM_SEED)
+def build_folder_pairs(
+    folders: Sequence[Path],
+    num_samples: int,
+    rng: random.Random,
+) -> list[tuple[Path, Path]]:
+    pairs = list(itertools.permutations(folders, 2))
+    if not pairs:
+        return []
 
-    for i in range(NUM_SAMPLES):
-        # 1. 랜덤으로 두 폴더 선택 (중복 허용 여부는 choice vs sample. 여기선 서로 다른 폴더 sample)
-        folder_warp, folder_weft = random.sample(all_folders, 2)
+    rng.shuffle(pairs)
+    if num_samples <= len(pairs):
+        return pairs[:num_samples]
 
-        name_warp = os.path.basename(folder_warp)
-        name_weft = os.path.basename(folder_weft)
+    selected_pairs = list(pairs)
+    while len(selected_pairs) < num_samples:
+        selected_pairs.append(rng.choice(pairs))
+    return selected_pairs
 
-        mix_name = f"Mix_{i + 1:02d}_W({name_warp})_x_H({name_weft})"
-        print(f"\n[{i + 1}/{NUM_SAMPLES}] 조합 생성: {mix_name}")
 
-        out_dir = os.path.join(BASE_OUTPUT_DIR, mix_name)
-        os.makedirs(out_dir, exist_ok=True)
+def run_pipeline(config: PipelineConfig) -> int:
+    rng = random.Random(config.random_seed)
+    folders = collect_subfolders(config.root_input_dir)
+    if len(folders) < 2:
+        raise RuntimeError("At least two source folders are required for mix generation")
 
-        # 2. 텍스처 생성
-        # 기준 크기는 Warp 폴더의 최적 크기를 따름 (물리적 크기 기준점)
-        tex_warp_path = os.path.join(out_dir, "texture_warp.png")
-        success_w, cols, rows = create_texture_from_folder(folder_warp, tex_warp_path)
+    selected_pairs = build_folder_pairs(folders, config.num_samples, rng)
+    print(f"========== Mix generation start ({len(selected_pairs)} samples) ==========")
+    print(f"Source root: {config.root_input_dir}")
+    print(f"Output root: {config.base_output_dir}")
+    if config.random_seed is not None:
+        print(f"Seed: {config.random_seed}")
+    else:
+        print("Seed: random")
 
-        if not success_w:
-            print("   (경사 이미지 생성 실패 - 건너뜀)")
-            continue
+    success_count = 0
+    failure_count = 0
 
-        # 위사 텍스처는 경사 텍스처의 크기(cols, rows)에 맞춰서 생성 (강제 맞춤)
-        tex_weft_path = os.path.join(out_dir, "texture_weft.png")
-        success_h, _, _ = create_texture_from_folder(folder_weft, tex_weft_path, req_cols=cols, req_rows=rows)
+    for sample_index, (warp_folder, weft_folder) in enumerate(selected_pairs, start=1):
+        mix_name = f"Mix_{sample_index:02d}_W({warp_folder.name})_x_H({weft_folder.name})"
+        output_dir = config.base_output_dir / mix_name
+        warp_texture_path = output_dir / "texture_warp.png"
+        weft_texture_path = output_dir / "texture_weft.png"
+        render_output_path = output_dir / f"{mix_name}.png"
 
-        if not success_h:
-            print("   (위사 이미지 생성 실패 - 건너뜀)")
-            continue
+        print(f"\n[{sample_index}/{len(selected_pairs)}] {mix_name}")
 
-        # 3. 블렌더 실행
-        render_out = os.path.join(out_dir, f"{mix_name}.png")
-        print(f"   ▶ 블렌더 렌더링... (Grid: {cols}x{rows})")
-        run_blender_mix(tex_warp_path, tex_weft_path, cols, rows, render_out)
-        print("   ✅ 완료")
+        try:
+            cols, rows = create_texture_from_folder(
+                warp_folder,
+                warp_texture_path,
+                config.swatch_res_px,
+                rng,
+            )
+            create_texture_from_folder(
+                weft_folder,
+                weft_texture_path,
+                config.swatch_res_px,
+                rng,
+                req_grid=(cols, rows),
+            )
+            print(f"   Render grid: {cols}x{rows}")
+            run_blender_mix(
+                config,
+                warp_texture_path,
+                weft_texture_path,
+                cols,
+                rows,
+                render_output_path,
+            )
+            success_count += 1
+            print("   Completed")
+        except Exception as exc:
+            failure_count += 1
+            print(f"   Failed: {exc}")
 
-    print("\n========== 모든 작업 완료 ==========")
+    print("\n========== Mix generation summary ==========")
+    print(f"Success: {success_count}")
+    print(f"Failed: {failure_count}")
+    return 0 if failure_count == 0 else 1
+
+
+def main() -> int:
+    try:
+        config = parse_args().validate()
+        return run_pipeline(config)
+    except Exception as exc:
+        print(f"[Error] {exc}")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

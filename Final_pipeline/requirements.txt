@@ -1,0 +1,5 @@
+numpy==1.26.4
+opencv-python==4.11.0.86
+Pillow==11.1.0
+onnxruntime>=1.16,<2
+rembg>=2.0,<3

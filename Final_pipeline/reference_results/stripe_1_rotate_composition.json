@@ -1,0 +1,43 @@
+{
+  "garment": "G04",
+  "stem": "stripe_1_rotate",
+  "extracted": 21,
+  "used": 20,
+  "excluded": 1,
+  "cols": 4,
+  "rows": 5,
+  "grid": "4x5",
+  "physical_size_cm": "40 x 50",
+  "utilization_pct": 95.2,
+  "seed": 42,
+  "texture_px": [
+    1504,
+    1880
+  ],
+  "output": "stripe_1_rotate_master_texture_4x5.png",
+  "order_used": [
+    "stripe_1_rotate_crop_20.png",
+    "stripe_1_rotate_crop_06.png",
+    "stripe_1_rotate_crop_15.png",
+    "stripe_1_rotate_crop_05.png",
+    "stripe_1_rotate_crop_10.png",
+    "stripe_1_rotate_crop_14.png",
+    "stripe_1_rotate_crop_16.png",
+    "stripe_1_rotate_crop_19.png",
+    "stripe_1_rotate_crop_07.png",
+    "stripe_1_rotate_crop_13.png",
+    "stripe_1_rotate_crop_18.png",
+    "stripe_1_rotate_crop_11.png",
+    "stripe_1_rotate_crop_02.png",
+    "stripe_1_rotate_crop_12.png",
+    "stripe_1_rotate_crop_03.png",
+    "stripe_1_rotate_crop_17.png",
+    "stripe_1_rotate_crop_08.png",
+    "stripe_1_rotate_crop_09.png",
+    "stripe_1_rotate_crop_01.png",
+    "stripe_1_rotate_crop_04.png"
+  ],
+  "excluded_files": [
+    "stripe_1_rotate_crop_21.png"
+  ]
+}

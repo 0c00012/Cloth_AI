@@ -1,22 +1,33 @@
 # -*- coding: utf-8 -*-
 """
-티셔츠 꽉 채우기 (Greedy Packing)
-- 랜덤 아님: 왼쪽 상단부터 훑으며 10cm 박스가 들어가는 족족 확보함
-- 겹침 없음: 한 번 확보한 자리는 '사용됨(Occupied)' 처리
-- 최대 수율: 물리적으로 들어갈 수 있는 최대 개수의 스와치를 생성
+[LEGACY BASELINE] Raster-scan greedy packing.
+
+This is the original swatch extraction code. It scans the image from the top-left
+in row-major order with a 10 px stride and immediately accepts every 376 x 376 px
+window that lies fully inside the garment mask and does not overlap an already
+accepted window. Its placement is decided by the scan order, so it does NOT
+guarantee a maximum swatch count; in the paper it is only the "raster greedy"
+baseline of the placement comparison (Section 4.4, Table 2, Figures 9-10).
+
+The final method of the paper is 2_extract_swatches.py (grid-origin optimization).
+
+Inputs : work/01_segmented/*_nobg.png
+Outputs: work/legacy_greedy_packing/<garment>/<garment>_crop_NN.png
 """
 
 import os
+import sys
 import numpy as np
 import cv2
 from pathlib import Path
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pipeline_config import SEGMENT_DIR, ROOT  # noqa: E402
+
 # ====== 사용자 설정 ======
-# 배경 제거된 이미지가 있는 폴더 (preprocess_crop.py 결과물 중 _nobg.png 파일들)
-INPUT_DIR = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\1110_2_crop_size_1010"
-# 결과 저장 폴더
-OUTPUT_DIR = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no4_Scanning\1117_max_packing"
+INPUT_DIR = str(SEGMENT_DIR)                                   # *_nobg.png from step 1
+OUTPUT_DIR = str(ROOT / "work" / "legacy_greedy_packing")     # baseline output (not used downstream)
 
 # 물리적 기준 (고정)
 REF_W_PX = 3755  # 100cm

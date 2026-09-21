@@ -1,0 +1,48 @@
+{
+  "garment": "G02",
+  "stem": "check_1_rotate",
+  "extracted": 26,
+  "used": 25,
+  "excluded": 1,
+  "cols": 5,
+  "rows": 5,
+  "grid": "5x5",
+  "physical_size_cm": "50 x 50",
+  "utilization_pct": 96.2,
+  "seed": 42,
+  "texture_px": [
+    1880,
+    1880
+  ],
+  "output": "check_1_rotate_master_texture_5x5.png",
+  "order_used": [
+    "check_1_rotate_crop_17.png",
+    "check_1_rotate_crop_13.png",
+    "check_1_rotate_crop_10.png",
+    "check_1_rotate_crop_26.png",
+    "check_1_rotate_crop_20.png",
+    "check_1_rotate_crop_07.png",
+    "check_1_rotate_crop_06.png",
+    "check_1_rotate_crop_11.png",
+    "check_1_rotate_crop_16.png",
+    "check_1_rotate_crop_23.png",
+    "check_1_rotate_crop_12.png",
+    "check_1_rotate_crop_19.png",
+    "check_1_rotate_crop_02.png",
+    "check_1_rotate_crop_15.png",
+    "check_1_rotate_crop_24.png",
+    "check_1_rotate_crop_14.png",
+    "check_1_rotate_crop_03.png",
+    "check_1_rotate_crop_18.png",
+    "check_1_rotate_crop_25.png",
+    "check_1_rotate_crop_05.png",
+    "check_1_rotate_crop_22.png",
+    "check_1_rotate_crop_08.png",
+    "check_1_rotate_crop_09.png",
+    "check_1_rotate_crop_01.png",
+    "check_1_rotate_crop_04.png"
+  ],
+  "excluded_files": [
+    "check_1_rotate_crop_21.png"
+  ]
+}

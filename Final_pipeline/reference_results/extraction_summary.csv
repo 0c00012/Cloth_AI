@@ -1,0 +1,6 @@
+﻿garment,stem,image_width,image_height,foreground_px,grid_origins_tested,grid_origin_xy,count,fixed_origin_count,coverage_pct_of_mask
+G01,all-over pattern_rotate,3321,2373,4043776,141376,"(34, 147)",21,16,73.41890351987846
+G02,check_1_rotate,3393,2628,5166399,141376,"(227, 231)",26,22,71.14773752472466
+G03,print_1_rotate,3755,2628,5972642,141376,"(346, 208)",32,26,75.74590943170543
+G04,stripe_1_rotate,3252,2433,4081984,141376,"(40, 331)",21,20,72.73169125601669
+G05,stripe_2_rotate,3755,2628,4486614,141376,"(118, 66)",22,19,69.32336947194477

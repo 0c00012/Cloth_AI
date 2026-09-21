@@ -1,0 +1,7 @@
+﻿garment,stem,extracted,used,excluded,grid,physical_size_cm,utilization_pct
+G01,all-over pattern_rotate,21,20,1,4x5,40 x 50,95.2
+G02,check_1_rotate,26,25,1,5x5,50 x 50,96.2
+G03,print_1_rotate,32,30,2,5x6,50 x 60,93.8
+G04,stripe_1_rotate,21,20,1,4x5,40 x 50,95.2
+G05,stripe_2_rotate,22,20,2,4x5,40 x 50,90.9
+Total,,122,115,7,,,94.3

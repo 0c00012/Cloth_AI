@@ -1,0 +1,32 @@
+# --- editor / python ---
+.idea/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- large local data, experiment dumps and archives (kept out of GitHub) ---
+*.zip
+/data/
+data.zip
+no1_tshirt_crop/
+no2_blender_swatch_maker/
+no4_Scanning/
+paper_pipeline/
+packing_step_by_step_demo/
+renders/
+renders_1117/
+Result_Large_Weave/
+Result_Large_Weave_Mix/
+Result_Pipeline/
+Diffusion_pipeline_package/
+0428_dino_guided_swatch_pipeline/**/test_dataset/
+0428_dino_guided_swatch_pipeline/**/test_run/
+requirements.txt
+!Final_pipeline/requirements.txt
+
+# --- Final_pipeline: generated outputs (re-creatable with the scripts) ---
+Final_pipeline/work/
+Final_pipeline/outputs/
+Final_pipeline/experiments/results*/
+!Final_pipeline/data/input_images/

@@ -18,13 +18,14 @@ from PIL import Image
 
 # 1. ★ 스와치 폴더들이 들어있는 '최상위 부모 폴더' 경로
 # (calc_max_area_and_stitch.py의 OUTPUT_DIR 경로를 넣으세요)
-ROOT_INPUT_DIR = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no4_Scanning\1117_max_packing"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_INPUT_DIR = os.path.join(SCRIPT_DIR, "work", "max_packing")
 
 # 2. 결과가 저장될 폴더
-BASE_OUTPUT_DIR = r"C:\Users\_idal\PycharmProjects\Cloth_AI\Result_Large_Weave"
+BASE_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "outputs", "large_weave")
 
 # 3. 블렌더 스크립트 파일명
-BLENDER_SCRIPT = "Blender_Large_Weave.py"
+BLENDER_SCRIPT = os.path.join(SCRIPT_DIR, "Blender_Large_Weave.py")
 
 # 4. 물리적 기준 (10cm = 376px)
 SWATCH_RES_PX = 376
@@ -113,6 +114,10 @@ def create_master_texture_dynamic(input_dir, save_path):
 
 
 def find_blender_auto():
+    env_path = os.environ.get("BLENDER_EXE")
+    if env_path and os.path.exists(env_path):
+        return env_path
+
     path = shutil.which("blender")
     if path: return path
     pf = r"C:\Program Files\Blender Foundation"
@@ -130,7 +135,7 @@ def run_blender(texture_path, cols, rows, output_folder, folder_name):
         print("   ❌ 블렌더 실행 파일을 찾을 수 없습니다.")
         return
 
-    script_path = os.path.join(os.getcwd(), BLENDER_SCRIPT)
+    script_path = BLENDER_SCRIPT
 
     # 렌더링 파일명 설정 (Result/폴더명/폴더명_4x5.png)
     render_filename = f"{folder_name}_{cols}x{rows}.png"

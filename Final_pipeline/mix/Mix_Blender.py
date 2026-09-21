@@ -1,357 +1,500 @@
-import bpy
+from __future__ import annotations
+
 import sys
-import os
+from dataclasses import dataclass
+from math import pi
+from pathlib import Path
+
+import bpy
 import numpy as np
-from math import sin, pi
 
-# ==============================================================================
-# [CONFIG] 기존 비율 기반 설정으로 원복
-# ==============================================================================
 
-SWATCH_SIZE_CM = 10.0
-SWATCH_SIZE_PX = 3755
-RANDOM_SEED = 42
-
-# ★ [Reverted] 기존 코드의 비율 설정 방식
-CELL_PITCH_CM = 1.0  # 기본 격자 크기 (1.0cm)
-
-# 비율 변수들
-WEFT_WIDTH_RATIO = 0.65
-WARP_WIDTH_SCALE = 0.75
-WIDTH_TIGHTEN_FACTOR = 1.15
-MAX_WIDTH_RATIO_CAP = 0.95
-THICK_RATIO = 0.25
-
-# Z-Offset
-WEFT_Z_OFFSET_M = 0.0003
-
-# Render
-SAMPLES = 1024
-CM_EXPOSURE = 0.05
-RESOLUTION_SCALE = 1.0
-
-# World
-WORLD_STRENGTH = 0.15
-WORLD_COLOR = (1.0, 1.0, 1.0, 1.0)
-LIGHT_SIZE_MULT = 1.25
-LIGHT_TOP_ENERGY_W = 22.0
-LIGHT_TOP_HEIGHT_M = 1.5
-
-# Crimp
-CRIMP_RATIO = 0.32
-CRIMP_SCALE = 0.7
-
-STEPS_PER_CELL = 4
-BEVEL_RES = 3
-
-# Masking
-WEFT_SIDE_COLOR = (0, 0, 0, 0)
-TOP_MASK_LOW = 0.65
-TOP_MASK_HIGH = 0.95
-
-# ==============================================================================
-# [DERIVED VALUES] 비율 계산 로직 복구
-# ==============================================================================
 CM2M = 0.01
 
-# 1. 기본 피치 계산
-pitch_m = CELL_PITCH_CM * CM2M
 
-# 2. 경사/위사 피치 (기본적으로 동일하게 설정)
-warp_pitch_m = pitch_m
-weft_pitch_m = pitch_m
+@dataclass(frozen=True)
+class WeaveSettings:
+    swatch_size_cm: float = 10.0
+    random_seed: int | None = 42
 
-# 3. 폭과 두께 계산 (비율 공식 적용)
-_weft_ratio = min(MAX_WIDTH_RATIO_CAP, WEFT_WIDTH_RATIO * WIDTH_TIGHTEN_FACTOR)
-weft_w = pitch_m * _weft_ratio
-warp_w = weft_w * WARP_WIDTH_SCALE
+    cell_pitch_cm: float = 1.0
+    weft_width_ratio: float = 0.65
+    warp_width_scale: float = 0.75
+    width_tighten_factor: float = 1.15
+    max_width_ratio_cap: float = 0.95
+    thick_ratio: float = 0.25
+    weft_z_offset_m: float = 0.0003
 
-warp_t = pitch_m * THICK_RATIO
-weft_t = pitch_m * THICK_RATIO
+    samples: int = 1024
+    exposure: float = 0.05
+    resolution_scale: float = 1.0
 
-# 4. 굴곡 계산
-avg_pitch = pitch_m
-crimp_amp = avg_pitch * CRIMP_RATIO * CRIMP_SCALE
+    world_strength: float = 0.15
+    world_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+    light_size_mult: float = 1.25
+    light_top_energy_w: float = 22.0
+    light_top_height_m: float = 1.5
+
+    crimp_ratio: float = 0.32
+    crimp_scale: float = 0.7
+
+    steps_per_cell: int = 4
+    bevel_resolution: int = 3
+
+    weft_side_color: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    top_mask_low: float = 0.65
+    top_mask_high: float = 0.95
 
 
-# ==============================================================================
-# [FUNCTIONS]
-# ==============================================================================
+@dataclass(frozen=True)
+class GeometryConfig:
+    warp_pitch_m: float
+    weft_pitch_m: float
+    warp_width_m: float
+    weft_width_m: float
+    warp_thickness_m: float
+    weft_thickness_m: float
+    crimp_amplitude_m: float
 
-def set_random_seed(seed):
-    if seed is not None:
-        import random
-        random.seed(seed)
-        np.random.seed(seed)
-        print(f"Set Random Seed: {seed}")
+
+@dataclass(frozen=True)
+class RenderJob:
+    warp_texture_path: Path
+    weft_texture_path: Path
+    cols: int
+    rows: int
+    output_path: Path
+
+    def validate(self) -> "RenderJob":
+        if not self.warp_texture_path.exists():
+            raise FileNotFoundError(f"Warp texture does not exist: {self.warp_texture_path}")
+        if not self.weft_texture_path.exists():
+            raise FileNotFoundError(f"Weft texture does not exist: {self.weft_texture_path}")
+        if self.cols <= 0 or self.rows <= 0:
+            raise ValueError(f"Grid size must be positive, got {self.cols}x{self.rows}")
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        return self
+
+    @property
+    def physical_width_m(self) -> float:
+        return self.cols * SETTINGS.swatch_size_cm * CM2M
+
+    @property
+    def physical_height_m(self) -> float:
+        return self.rows * SETTINGS.swatch_size_cm * CM2M
 
 
-def nuke_scene():
-    bpy.ops.object.select_all(action='SELECT')
+@dataclass
+class MaterialBundle:
+    warp_material: object
+    weft_material: object
+    warp_tex_coord: object
+    weft_tex_coord: object
+
+
+SETTINGS = WeaveSettings()
+
+
+def derive_geometry(settings: WeaveSettings) -> GeometryConfig:
+    pitch_m = settings.cell_pitch_cm * CM2M
+    weft_width_m = pitch_m * min(
+        settings.max_width_ratio_cap,
+        settings.weft_width_ratio * settings.width_tighten_factor,
+    )
+    return GeometryConfig(
+        warp_pitch_m=pitch_m,
+        weft_pitch_m=pitch_m,
+        warp_width_m=weft_width_m * settings.warp_width_scale,
+        weft_width_m=weft_width_m,
+        warp_thickness_m=pitch_m * settings.thick_ratio,
+        weft_thickness_m=pitch_m * settings.thick_ratio,
+        crimp_amplitude_m=pitch_m * settings.crimp_ratio * settings.crimp_scale,
+    )
+
+
+GEOMETRY = derive_geometry(SETTINGS)
+
+
+def set_random_seed(seed: int | None) -> None:
+    if seed is None:
+        return
+
+    import random
+
+    random.seed(seed)
+    np.random.seed(seed)
+    print(f"Set random seed: {seed}")
+
+
+def parse_args(argv: list[str]) -> RenderJob:
+    try:
+        separator_index = argv.index("--")
+        warp_texture_path = Path(argv[separator_index + 1]).resolve()
+        weft_texture_path = Path(argv[separator_index + 2]).resolve()
+        cols = int(argv[separator_index + 3])
+        rows = int(argv[separator_index + 4])
+        output_path = Path(argv[separator_index + 5]).resolve()
+    except (ValueError, IndexError) as exc:
+        raise ValueError(
+            "Usage: blender -b -P Mix_Blender.py -- "
+            "<warp_texture> <weft_texture> <cols> <rows> <output_path>"
+        ) from exc
+
+    return RenderJob(
+        warp_texture_path=warp_texture_path,
+        weft_texture_path=weft_texture_path,
+        cols=cols,
+        rows=rows,
+        output_path=output_path,
+    ).validate()
+
+
+def clear_scene() -> None:
+    bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
-    for c in (bpy.data.materials, bpy.data.images, bpy.data.textures, bpy.data.curves, bpy.data.lights,
-              bpy.data.cameras, bpy.data.worlds):
-        for b in c: c.remove(b)
+
+    data_groups = (
+        bpy.data.materials,
+        bpy.data.images,
+        bpy.data.textures,
+        bpy.data.curves,
+        bpy.data.lights,
+        bpy.data.cameras,
+        bpy.data.worlds,
+    )
+    for data_group in data_groups:
+        for block in list(data_group):
+            data_group.remove(block, do_unlink=True)
 
 
-def setup_renderer_and_world(filepath, cols, rows):
-    scn = bpy.context.scene
-    scn.render.engine = 'CYCLES'
-    scn.cycles.samples = SAMPLES
-    if hasattr(scn.cycles, 'use_adaptive_sampling'):
-        scn.cycles.use_adaptive_sampling = True
-        scn.cycles.adaptive_threshold = 0.01
-
+def enable_gpu_if_available(scene: bpy.types.Scene) -> None:
     try:
-        prefs = bpy.context.preferences.addons['cycles'].preferences
-        prefs.compute_device_type = 'CUDA'
-        scn.cycles.device = 'GPU'
-        scn.cycles.denoiser = 'OPTIX'
-        bpy.context.view_layer.cycles.use_denoising = True
-    except:
-        pass
+        preferences = bpy.context.preferences.addons["cycles"].preferences
+    except KeyError:
+        return
 
-    vs = scn.view_settings
+    for device_type in ("OPTIX", "CUDA"):
+        try:
+            preferences.compute_device_type = device_type
+            preferences.get_devices()
+            for device in preferences.devices:
+                device.use = True
+
+            if preferences.devices:
+                scene.cycles.device = "GPU"
+                try:
+                    scene.cycles.denoiser = "OPTIX"
+                    bpy.context.view_layer.cycles.use_denoising = True
+                except Exception:
+                    pass
+                print(f"Cycles device: {device_type}")
+                return
+        except Exception as exc:
+            print(f"Cycles device setup skipped for {device_type}: {exc}")
+
+
+def setup_renderer_and_world(output_path: Path, cols: int, rows: int) -> None:
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = SETTINGS.samples
+
+    if hasattr(scene.cycles, "use_adaptive_sampling"):
+        scene.cycles.use_adaptive_sampling = True
+        scene.cycles.adaptive_threshold = 0.01
+
+    enable_gpu_if_available(scene)
+
+    view_settings = scene.view_settings
     try:
-        vs.view_transform = 'Filmic'
-    except:
+        view_settings.view_transform = "Filmic"
+    except Exception:
         pass
-    vs.exposure = CM_EXPOSURE
+    view_settings.exposure = SETTINGS.exposure
 
-    # 해상도 설정
     base_px = 376
-    scn.render.resolution_x = int(base_px * cols * RESOLUTION_SCALE)
-    scn.render.resolution_y = int(base_px * rows * RESOLUTION_SCALE)
-
-    scn.render.image_settings.file_format = 'PNG'
-    scn.render.image_settings.color_mode = 'RGBA'
-    scn.render.film_transparent = True
-    scn.render.filepath = filepath
+    scene.render.resolution_x = int(base_px * cols * SETTINGS.resolution_scale)
+    scene.render.resolution_y = int(base_px * rows * SETTINGS.resolution_scale)
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGBA"
+    scene.render.film_transparent = True
+    scene.render.filepath = str(output_path)
 
     world = bpy.data.worlds.new("World")
-    scn.world = world
+    scene.world = world
     world.use_nodes = True
-    bg = world.node_tree.nodes["Background"]
-    bg.inputs["Color"].default_value = WORLD_COLOR
-    bg.inputs["Strength"].default_value = WORLD_STRENGTH
+    node_tree = world.node_tree
+
+    background = node_tree.nodes.get("Background")
+    if background is None:
+        background = node_tree.nodes.new("ShaderNodeBackground")
+
+    world_output = node_tree.nodes.get("World Output")
+    if world_output is None:
+        world_output = node_tree.nodes.new("ShaderNodeOutputWorld")
+    node_tree.links.new(background.outputs["Background"], world_output.inputs["Surface"])
+
+    background.inputs["Color"].default_value = SETTINGS.world_color
+    background.inputs["Strength"].default_value = SETTINGS.world_strength
 
 
-def make_rect_profile(name, width, thickness):
-    cu = bpy.data.curves.new(name=name, type='CURVE')
-    cu.dimensions = '2D'
-    cu.fill_mode = 'BOTH'
-    sp = cu.splines.new('POLY')
-    sp.use_cyclic_u = True
-    hw, ht = float(width) * 0.5, float(thickness) * 0.5
-    pts = [(-hw, -ht, 0), (hw, -ht, 0), (hw, ht, 0), (-hw, ht, 0)]
-    sp.points.add(len(pts) - 1)
-    for i, (x, y, z) in enumerate(pts):
-        sp.points[i].co = (x, y, z, 1.0)
-    return bpy.data.objects.new(name, cu)
+def make_rect_profile(name: str, width: float, thickness: float) -> bpy.types.Object:
+    curve = bpy.data.curves.new(name=name, type="CURVE")
+    curve.dimensions = "2D"
+    curve.fill_mode = "BOTH"
+    spline = curve.splines.new("POLY")
+    spline.use_cyclic_u = True
+
+    half_width = width * 0.5
+    half_thickness = thickness * 0.5
+    points = [
+        (-half_width, -half_thickness, 0.0),
+        (half_width, -half_thickness, 0.0),
+        (half_width, half_thickness, 0.0),
+        (-half_width, half_thickness, 0.0),
+    ]
+    spline.points.add(len(points) - 1)
+    for index, (x_value, y_value, z_value) in enumerate(points):
+        spline.points[index].co = (x_value, y_value, z_value, 1.0)
+
+    return bpy.data.objects.new(name, curve)
 
 
-def build_thread_optimized(name, crossing_count, axis, idx, mat, prof, z_offset=0):
-    if axis == 'warp':
-        crossing_pitch = weft_pitch_m
-    else:
-        crossing_pitch = warp_pitch_m
+def build_thread_curve(
+    name: str,
+    crossing_count: int,
+    axis: str,
+    index: int,
+    material: bpy.types.Material,
+    profile: bpy.types.Object,
+    z_offset: float = 0.0,
+) -> bpy.types.Object:
+    crossing_pitch = GEOMETRY.weft_pitch_m if axis == "warp" else GEOMETRY.warp_pitch_m
 
-    cu = bpy.data.curves.new(name, 'CURVE')
-    cu.dimensions = '3D'
-    cu.fill_mode = 'FULL'
-    spline = cu.splines.new('POLY')
+    curve = bpy.data.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    curve.fill_mode = "FULL"
+    spline = curve.splines.new("POLY")
 
-    total_steps = crossing_count * STEPS_PER_CELL
+    total_steps = max(1, crossing_count * SETTINGS.steps_per_cell)
     spline.points.add(total_steps)
 
-    total_len_m = crossing_count * crossing_pitch
-    half_len = total_len_m / 2
+    total_length = crossing_count * crossing_pitch
+    half_length = total_length / 2.0
 
-    t = np.linspace(0, total_len_m, total_steps + 1)
-    j = np.minimum((t // crossing_pitch).astype(int), crossing_count - 1)
-    u = (t - j * crossing_pitch) / crossing_pitch
+    t_values = np.linspace(0.0, total_length, total_steps + 1)
+    crossing_indices = np.minimum((t_values // crossing_pitch).astype(int), crossing_count - 1)
+    normalized = (t_values - crossing_indices * crossing_pitch) / crossing_pitch
 
-    if axis == 'warp':
-        x = np.zeros_like(t)
-        y = -half_len + t
-        phase = (idx + j) % 2
-        sign = np.where(phase == 0, 1, -1)
-        z = sign * crimp_amp * np.sin(pi * u)
+    if axis == "warp":
+        x_values = np.zeros_like(t_values)
+        y_values = -half_length + t_values
+        phase = (index + crossing_indices) % 2
+        direction = np.where(phase == 0, 1.0, -1.0)
+        z_values = direction * GEOMETRY.crimp_amplitude_m * np.sin(pi * normalized)
     else:
-        x = -half_len + t
-        y = np.zeros_like(t)
-        phase = (j + idx) % 2
-        sign = np.where(phase == 0, -1, 1)
-        z = sign * crimp_amp * np.sin(pi * u) + z_offset
+        x_values = -half_length + t_values
+        y_values = np.zeros_like(t_values)
+        phase = (crossing_indices + index) % 2
+        direction = np.where(phase == 0, -1.0, 1.0)
+        z_values = direction * GEOMETRY.crimp_amplitude_m * np.sin(pi * normalized) + z_offset
 
-    points = np.empty(len(t) * 4, dtype=np.float32)
-    points[0::4] = x
-    points[1::4] = y
-    points[2::4] = z
-    points[3::4] = 1.0
-    spline.points.foreach_set('co', points)
+    packed_points = np.empty(len(t_values) * 4, dtype=np.float32)
+    packed_points[0::4] = x_values
+    packed_points[1::4] = y_values
+    packed_points[2::4] = z_values
+    packed_points[3::4] = 1.0
+    spline.points.foreach_set("co", packed_points)
 
-    obj = bpy.data.objects.new(name, cu)
-    obj.data.bevel_mode = 'OBJECT'
-    obj.data.bevel_object = prof
-    obj.data.bevel_resolution = BEVEL_RES
+    obj = bpy.data.objects.new(name, curve)
+    obj.data.bevel_mode = "OBJECT"
+    obj.data.bevel_object = profile
+    obj.data.bevel_resolution = SETTINGS.bevel_resolution
     obj.data.use_fill_caps = True
-    obj.data.materials.append(mat)
+    obj.data.materials.append(material)
     return obj
 
 
-def create_shader_for_texture(name, tex_path, total_w_m, total_h_m):
-    mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
-    nt = mat.node_tree
-    nt.nodes.clear()
+def create_textured_material(
+    name: str,
+    texture_path: Path,
+    total_width_m: float,
+    total_height_m: float,
+) -> tuple[bpy.types.Material, bpy.types.ShaderNodeTexCoord]:
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    node_tree = material.node_tree
+    node_tree.nodes.clear()
 
-    out = nt.nodes.new("ShaderNodeOutputMaterial")
-    bs = nt.nodes.new("ShaderNodeBsdfPrincipled")
-    mix = nt.nodes.new("ShaderNodeMixRGB")
-    mix.inputs["Color1"].default_value = WEFT_SIDE_COLOR
+    output = node_tree.nodes.new("ShaderNodeOutputMaterial")
+    principled = node_tree.nodes.new("ShaderNodeBsdfPrincipled")
+    principled.inputs["Roughness"].default_value = 0.8
 
-    tex = nt.nodes.new("ShaderNodeTexImage")
-    try:
-        img = bpy.data.images.load(tex_path)
-        img.colorspace_settings.name = "sRGB"
-        tex.image = img
-        tex.extension = 'CLIP'
-    except:
-        pass
+    mix_node = node_tree.nodes.new("ShaderNodeMixRGB")
+    mix_node.inputs["Color1"].default_value = SETTINGS.weft_side_color
 
-    tco = nt.nodes.new("ShaderNodeTexCoord")
-    map_node = nt.nodes.new("ShaderNodeMapping")
-    map_node.inputs["Scale"].default_value = (1.0 / total_w_m, 1.0 / total_h_m, 1.0)
-    map_node.inputs["Location"].default_value = (0.5, 0.5, 0.0)
+    image_node = node_tree.nodes.new("ShaderNodeTexImage")
+    image = bpy.data.images.load(str(texture_path), check_existing=True)
+    image.colorspace_settings.name = "sRGB"
+    image_node.image = image
+    image_node.extension = "CLIP"
 
-    geom = nt.nodes.new("ShaderNodeNewGeometry")
-    dot = nt.nodes.new("ShaderNodeVectorMath")
-    dot.operation = 'DOT_PRODUCT'
-    dot.inputs[1].default_value = (0.0, 0.0, 1.0)
+    tex_coord = node_tree.nodes.new("ShaderNodeTexCoord")
+    mapping = node_tree.nodes.new("ShaderNodeMapping")
+    mapping.inputs["Scale"].default_value = (
+        1.0 / total_width_m,
+        1.0 / total_height_m,
+        1.0,
+    )
+    mapping.inputs["Location"].default_value = (0.5, 0.5, 0.0)
 
-    mr = nt.nodes.new("ShaderNodeMapRange")
-    mr.inputs['From Min'].default_value = -1.0
-    mr.inputs['From Max'].default_value = 1.0
-    mr.inputs['To Min'].default_value = 0.0
-    mr.inputs['To Max'].default_value = 1.0
-    mr.clamp = True
+    geometry = node_tree.nodes.new("ShaderNodeNewGeometry")
+    dot_product = node_tree.nodes.new("ShaderNodeVectorMath")
+    dot_product.operation = "DOT_PRODUCT"
+    dot_product.inputs[1].default_value = (0.0, 0.0, 1.0)
 
-    ramp = nt.nodes.new("ShaderNodeValToRGB")
-    ramp.color_ramp.elements[0].position = float(TOP_MASK_LOW)
-    ramp.color_ramp.elements[1].position = float(TOP_MASK_HIGH)
+    map_range = node_tree.nodes.new("ShaderNodeMapRange")
+    map_range.inputs["From Min"].default_value = -1.0
+    map_range.inputs["From Max"].default_value = 1.0
+    map_range.inputs["To Min"].default_value = 0.0
+    map_range.inputs["To Max"].default_value = 1.0
+    map_range.clamp = True
 
-    nt.links.new(tco.outputs["Object"], map_node.inputs["Vector"])
-    nt.links.new(map_node.outputs["Vector"], tex.inputs["Vector"])
-    nt.links.new(geom.outputs["Normal"], dot.inputs[0])
-    nt.links.new(dot.outputs["Value"], mr.inputs['Value'])
-    nt.links.new(mr.outputs["Result"], ramp.inputs["Fac"])
-    nt.links.new(ramp.outputs["Color"], mix.inputs["Fac"])
-    nt.links.new(tex.outputs["Color"], mix.inputs["Color2"])
-    nt.links.new(mix.outputs["Color"], bs.inputs["Base Color"])
-    nt.links.new(bs.outputs["BSDF"], out.inputs["Surface"])
+    color_ramp = node_tree.nodes.new("ShaderNodeValToRGB")
+    color_ramp.color_ramp.elements[0].position = SETTINGS.top_mask_low
+    color_ramp.color_ramp.elements[1].position = SETTINGS.top_mask_high
 
-    return mat, map_node
+    node_tree.links.new(tex_coord.outputs["Object"], mapping.inputs["Vector"])
+    node_tree.links.new(mapping.outputs["Vector"], image_node.inputs["Vector"])
+    node_tree.links.new(geometry.outputs["Normal"], dot_product.inputs[0])
+    node_tree.links.new(dot_product.outputs["Value"], map_range.inputs["Value"])
+    node_tree.links.new(map_range.outputs["Result"], color_ramp.inputs["Fac"])
+    node_tree.links.new(color_ramp.outputs["Color"], mix_node.inputs["Fac"])
+    node_tree.links.new(image_node.outputs["Color"], mix_node.inputs["Color2"])
+    node_tree.links.new(mix_node.outputs["Color"], principled.inputs["Base Color"])
+    node_tree.links.new(principled.outputs["BSDF"], output.inputs["Surface"])
 
-
-def setup_materials_dual(tex_warp_path, tex_weft_path, total_w_m, total_h_m):
-    # 경사 (Warp) 재질
-    m_warp, map_warp = create_shader_for_texture("Mat_Warp", tex_warp_path, total_w_m, total_h_m)
-    # 위사 (Weft) 재질
-    m_weft, map_weft = create_shader_for_texture("Mat_Weft", tex_weft_path, total_w_m, total_h_m)
-    return m_warp, m_weft, map_warp, map_weft
-
-
-def setup_camera_and_light(total_w, total_h, n_cols, n_rows):
-    scn = bpy.context.scene
-
-    cam_data = bpy.data.cameras.new("WeaveCam")
-    cam_data.type = 'ORTHO'
-    cam_data.ortho_scale = max(total_w, total_h) * 1.05
-    cam = bpy.data.objects.new("WeaveCam", cam_data)
-    cam.location = (0, 0, max(total_w, total_h) * 2.0)
-    scn.collection.objects.link(cam)
-    scn.camera = cam
-
-    scale_factor_area = (n_cols * n_rows)
-    scale_factor_linear = max(n_cols, n_rows)
-
-    light_data = bpy.data.lights.new("Light_Top", 'AREA')
-    light_data.shape = 'RECTANGLE'
-    s = max(total_w, total_h)
-    light_data.size = max(s * LIGHT_SIZE_MULT, 0.05)
-    light_data.size_y = light_data.size
-    light_data.energy = LIGHT_TOP_ENERGY_W * scale_factor_area
-
-    light = bpy.data.objects.new("Light_Top", light_data)
-    light.location = (0, 0, LIGHT_TOP_HEIGHT_M * scale_factor_linear)
-    scn.collection.objects.link(light)
+    return material, tex_coord
 
 
-def main():
-    set_random_seed(RANDOM_SEED)
-
-    argv = sys.argv
-    try:
-        idx = argv.index("--")
-        tex_warp_path = argv[idx + 1]
-        tex_weft_path = argv[idx + 2]
-        n_cols = int(argv[idx + 3])
-        n_rows = int(argv[idx + 4])
-        out_path = argv[idx + 5]
-    except:
-        return
-
-    print(f"Build Start: Grid {n_cols}x{n_rows}")
-    nuke_scene()
-
-    col = bpy.data.collections.new("Weave")
-    bpy.context.scene.collection.children.link(col)
-
-    phys_w_m = n_cols * SWATCH_SIZE_CM * CM2M
-    phys_h_m = n_rows * SWATCH_SIZE_CM * CM2M
-
-    cnt_warp = int(phys_w_m / warp_pitch_m)
-    cnt_weft = int(phys_h_m / weft_pitch_m)
-
-    print(f"   Physical Size: {phys_w_m:.2f}m x {phys_h_m:.2f}m")
-
-    p_warp = make_rect_profile("Profile_Warp", warp_w, warp_t)
-    p_weft = make_rect_profile("Profile_Weft", weft_w, weft_t)
-
-    # Dual Material Setup
-    m_warp, m_weft, map_warp_node, map_weft_node = setup_materials_dual(
-        tex_warp_path, tex_weft_path, phys_w_m, phys_h_m
+def setup_materials(job: RenderJob) -> MaterialBundle:
+    warp_material, warp_tex_coord = create_textured_material(
+        "Mat_Warp",
+        job.warp_texture_path,
+        job.physical_width_m,
+        job.physical_height_m,
+    )
+    weft_material, weft_tex_coord = create_textured_material(
+        "Mat_Weft",
+        job.weft_texture_path,
+        job.physical_width_m,
+        job.physical_height_m,
+    )
+    return MaterialBundle(
+        warp_material=warp_material,
+        weft_material=weft_material,
+        warp_tex_coord=warp_tex_coord,
+        weft_tex_coord=weft_tex_coord,
     )
 
-    # Build Warp
-    start_x = -phys_w_m / 2 + warp_pitch_m / 2
-    for i in range(cnt_warp):
-        o = build_thread_optimized(f"Warp_{i}", cnt_weft, 'warp', i, m_warp, p_warp)
-        o.location.x = start_x + i * warp_pitch_m
-        col.objects.link(o)
 
-    # Build Weft
-    start_y = -phys_h_m / 2 + weft_pitch_m / 2
-    for j in range(cnt_weft):
-        o = build_thread_optimized(f"Weft_{j}", cnt_warp, 'weft', j, m_weft, p_weft, z_offset=WEFT_Z_OFFSET_M)
-        o.location.y = start_y + j * weft_pitch_m
-        col.objects.link(o)
+def setup_camera_and_light(total_width_m: float, total_height_m: float, cols: int, rows: int) -> None:
+    scene = bpy.context.scene
+    size = max(total_width_m, total_height_m)
 
-    # UV Target
-    empty = bpy.data.objects.new("UV_Target", None)
-    bpy.context.scene.collection.objects.link(empty)
+    camera_data = bpy.data.cameras.new("WeaveCam")
+    camera_data.type = "ORTHO"
+    camera_data.ortho_scale = size * 1.05
+    camera = bpy.data.objects.new("WeaveCam", camera_data)
+    camera.location = (0.0, 0.0, size * 2.0)
+    scene.collection.objects.link(camera)
+    scene.camera = camera
 
-    map_warp_node.inputs["Vector"].links[0].from_node.object = empty
-    map_weft_node.inputs["Vector"].links[0].from_node.object = empty
+    light_data = bpy.data.lights.new("Light_Top", "AREA")
+    light_data.shape = "RECTANGLE"
+    light_data.size = max(size * SETTINGS.light_size_mult, 0.05)
+    light_data.size_y = light_data.size
+    light_data.energy = SETTINGS.light_top_energy_w * (cols * rows)
 
-    setup_camera_and_light(phys_w_m, phys_h_m, n_cols, n_rows)
-    setup_renderer_and_world(out_path, n_cols, n_rows)
+    light = bpy.data.objects.new("Light_Top", light_data)
+    light.location = (0.0, 0.0, SETTINGS.light_top_height_m * max(cols, rows))
+    scene.collection.objects.link(light)
 
-    print(f"Render Start -> {out_path}")
+
+def attach_uv_target(materials: MaterialBundle) -> None:
+    target = bpy.data.objects.new("UV_Target", None)
+    bpy.context.scene.collection.objects.link(target)
+    materials.warp_tex_coord.object = target
+    materials.weft_tex_coord.object = target
+
+
+def main() -> int:
+    try:
+        job = parse_args(sys.argv)
+    except Exception as exc:
+        print(f"[Error] {exc}")
+        return 1
+
+    set_random_seed(SETTINGS.random_seed)
+    clear_scene()
+
+    weave_collection = bpy.data.collections.new("Weave")
+    bpy.context.scene.collection.children.link(weave_collection)
+
+    warp_count = max(1, int(job.physical_width_m / GEOMETRY.warp_pitch_m))
+    weft_count = max(1, int(job.physical_height_m / GEOMETRY.weft_pitch_m))
+
+    print(f"Build start: Grid {job.cols}x{job.rows}")
+    print(f"Physical size: {job.physical_width_m:.2f}m x {job.physical_height_m:.2f}m")
+    print(f"Threads: Warp {warp_count} / Weft {weft_count}")
+
+    warp_profile = make_rect_profile(
+        "Profile_Warp",
+        GEOMETRY.warp_width_m,
+        GEOMETRY.warp_thickness_m,
+    )
+    weft_profile = make_rect_profile(
+        "Profile_Weft",
+        GEOMETRY.weft_width_m,
+        GEOMETRY.weft_thickness_m,
+    )
+    materials = setup_materials(job)
+
+    start_x = -job.physical_width_m / 2.0 + GEOMETRY.warp_pitch_m / 2.0
+    for index in range(warp_count):
+        warp_thread = build_thread_curve(
+            f"Warp_{index}",
+            weft_count,
+            "warp",
+            index,
+            materials.warp_material,
+            warp_profile,
+        )
+        warp_thread.location.x = start_x + index * GEOMETRY.warp_pitch_m
+        weave_collection.objects.link(warp_thread)
+
+    start_y = -job.physical_height_m / 2.0 + GEOMETRY.weft_pitch_m / 2.0
+    for index in range(weft_count):
+        weft_thread = build_thread_curve(
+            f"Weft_{index}",
+            warp_count,
+            "weft",
+            index,
+            materials.weft_material,
+            weft_profile,
+            z_offset=SETTINGS.weft_z_offset_m,
+        )
+        weft_thread.location.y = start_y + index * GEOMETRY.weft_pitch_m
+        weave_collection.objects.link(weft_thread)
+
+    attach_uv_target(materials)
+    setup_camera_and_light(job.physical_width_m, job.physical_height_m, job.cols, job.rows)
+    setup_renderer_and_world(job.output_path, job.cols, job.rows)
+
+    print(f"Render start -> {job.output_path}")
     bpy.ops.render.render(write_still=True)
     print("Done.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

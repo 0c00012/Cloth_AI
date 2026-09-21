@@ -8,9 +8,8 @@ from math import sin, pi
 # [CONFIG]
 # ==============================================================================
 
-# Swatch geometry (Basis)
+# Swatch geometry (Basis): one master-texture grid cell = 10 x 10 cm
 SWATCH_SIZE_CM = 10.0
-SWATCH_SIZE_PX = 3755
 
 # ★ [NEW] 랜덤 시드 고정
 RANDOM_SEED = 42

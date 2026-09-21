@@ -1,0 +1,105 @@
+{
+  "garment": "G01",
+  "stem": "all-over pattern_rotate",
+  "source": "all-over pattern_rotate_nobg.png",
+  "image_width": 3321,
+  "image_height": 2373,
+  "swatch_px": 376,
+  "alpha_threshold": 10,
+  "foreground_px": 4043776,
+  "valid_top_left_positions": 2301195,
+  "grid_origins_tested": 141376,
+  "grid_origin_xy": [
+    34,
+    147
+  ],
+  "count": 21,
+  "fixed_origin_count": 16,
+  "coverage_pct_of_mask": 73.41890351987846,
+  "cells_xy_row_major": [
+    [
+      786,
+      147
+    ],
+    [
+      1162,
+      147
+    ],
+    [
+      1538,
+      147
+    ],
+    [
+      410,
+      523
+    ],
+    [
+      786,
+      523
+    ],
+    [
+      1162,
+      523
+    ],
+    [
+      1538,
+      523
+    ],
+    [
+      1914,
+      523
+    ],
+    [
+      2290,
+      523
+    ],
+    [
+      786,
+      899
+    ],
+    [
+      1162,
+      899
+    ],
+    [
+      1538,
+      899
+    ],
+    [
+      1914,
+      899
+    ],
+    [
+      786,
+      1275
+    ],
+    [
+      1162,
+      1275
+    ],
+    [
+      1538,
+      1275
+    ],
+    [
+      1914,
+      1275
+    ],
+    [
+      786,
+      1651
+    ],
+    [
+      1162,
+      1651
+    ],
+    [
+      1538,
+      1651
+    ],
+    [
+      1914,
+      1651
+    ]
+  ]
+}

@@ -26,8 +26,9 @@ from rembg import remove, new_session
 # =========================
 # 사용자 설정
 # =========================
-input_folder   = r"C:\Users\_idal\PycharmProjects\Cloth_AI\data\1022_samples\resize_RE"
-output_folder  = r"C:\Users\_idal\PycharmProjects\Cloth_AI\no1_tshirt_crop\1110_2_crop_size_1010"
+BASE_DIR = Path(__file__).resolve().parent
+input_folder = str(BASE_DIR / "data" / "input_images")
+output_folder = str(BASE_DIR / "work" / "cropped")
 SLICES_ROOT_DIR = os.path.join(output_folder, "slices_10h_10v")  # ← 분할이미지 보관 폴더(스와치별 하위폴더 생성)
 
 # 샘플 개수
