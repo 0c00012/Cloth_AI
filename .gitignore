@@ -30,3 +30,12 @@ Final_pipeline/work/
 Final_pipeline/outputs/
 Final_pipeline/experiments/results*/
 !Final_pipeline/data/input_images/
+
+# --- earlier experiments kept only on the local disk ---
+no0_size_calc/
+no3_fabric_post-process/
+0327_AI/
+0428_dino_guided_swatch_pipeline/
+fabricdiffusion_actual_pipeline/
+bpy_blender_requirements.txt
+최대수율_과정.py

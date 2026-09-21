@@ -33,11 +33,8 @@ Final_pipeline/          논문 파이프라인 (위 표)
   data/input_images/     원본 의류 사진 5장 (3,755 × 2,628 px)
   reference_results/     논문 수치 재현용 배치·합성 결과 (JSON/CSV)
   legacy/, experiments/, mix/
-0327_AI/                 (이전) 스와치 생성 LoRA 실험
-0428_dino_guided_swatch_pipeline/  (이전) DINO 유도 스와치 확장 실험
-fabricdiffusion_actual_pipeline/   (이전) FabricDiffusion 기반 실험
-no0_size_calc/ … no4_Scanning/     (이전) 단계별 초기 스크립트
-최대수율_과정.py           (이전) 그리디 과정 시각화
 ```
 
-`work/`, `outputs/`, 렌더 결과, 대용량 데이터·zip은 `.gitignore`로 제외되어 있으며 스크립트로 다시 만들 수 있습니다.
+이전 단계별 실험 폴더(no0–no4, paper_pipeline, LoRA/DINO/FabricDiffusion 실험)는 저장소에서 제거했습니다.
+필요하면 커밋 `fa8438f` 이전 이력에서 확인할 수 있습니다. `work/`, `outputs/`, 렌더 결과, 대용량 데이터·zip은
+`.gitignore`로 제외되어 있으며 스크립트로 다시 만들 수 있습니다.
