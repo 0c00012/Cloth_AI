@@ -1,6 +1,0 @@
-﻿garment,axis_aligned,best_theta_deg,best_count,gain
-G01,21,0.0,21,0
-G02,26,0.0,26,0
-G03,32,0.0,32,0
-G04,21,0.0,21,0
-G05,22,5.0,23,1

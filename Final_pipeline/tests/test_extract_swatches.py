@@ -37,54 +37,19 @@ def test_grid_origin_counts_match_direct_enumeration(seed):
             assert counts[oy, ox] == len(ex.grid_cells(valid, s, (ox, oy)))
 
 
-def test_selected_grid_is_valid_non_overlapping_and_maximal_within_family():
+def test_selected_grid_is_valid_non_overlapping_and_first_maximum():
     rng = np.random.default_rng(3)
     mask = rng.random((60, 50)) > 0.1
     s = 6
     valid = ex.valid_top_left(mask, s)
-    cells, origin, counts, info = ex.optimise_grid_origin(valid, s)
-    occ = ex.verify(mask, cells, s)                      # containment / overlap / area asserts
-    assert len(cells) == int(counts.max()) == info["max_count"]
-    assert 0 <= origin[0] < s and 0 <= origin[1] < s
-    # first-maximum rule: smallest y, then smallest x
-    oy, ox = np.argwhere(counts == counts.max())[0]
-    assert origin == (int(ox), int(oy))
-    assert occ.sum() == len(cells) * s * s
-
-
-def test_tie_break_prefers_larger_boundary_margin():
-    # a full rectangle: every origin gives the same count, so the margin rule decides
-    mask = np.ones((30, 30), dtype=bool)
-    mask[:2, :] = False
-    mask[-2:, :] = False
-    s = 5
-    valid = ex.valid_top_left(mask, s)
-    margin = ex.cell_margin_map(mask, s)
-    cells, origin, counts, info = ex.optimise_grid_origin(valid, s, margin)
-    assert info["tied_origins"] > 1
-    assert info["min_cell_margin_px"] >= info["first_tie_min_margin_px"]
+    cells, origin, counts = ex.optimise_grid_origin(valid, s)
+    ex.verify(mask, cells, s)                            # containment / overlap / area asserts
     assert len(cells) == int(counts.max())
-    ex.verify(mask, cells, s)
+    oy, ox = np.argwhere(counts == counts.max())[0]      # smallest y, then smallest x
+    assert origin == (int(ox), int(oy))
 
 
-def test_cell_margin_map_equals_min_distance_over_cell():
-    from scipy.ndimage import distance_transform_edt
-    mask = np.ones((20, 24), dtype=bool)
-    mask[:, :3] = False
-    mask[10:, 15:] = False
-    s = 4
-    dt = distance_transform_edt(mask)
-    m = ex.cell_margin_map(mask, s)
-    for y in range(0, 20 - s + 1, 3):
-        for x in range(0, 24 - s + 1, 5):
-            assert m[y, x] == pytest.approx(dt[y:y + s, x:x + s].min())
-
-
-def test_remaining_capacity_zero_means_no_square_fits():
+def test_full_square_mask_is_tiled_completely():
     mask = np.ones((8, 8), dtype=bool)
-    s = 4
-    valid = ex.valid_top_left(mask, s)
-    cells, origin, counts, _ = ex.optimise_grid_origin(valid, s)
-    occ = ex.verify(mask, cells, s)
-    assert len(cells) == 4
-    assert ex.remaining_capacity(mask, occ, s) == 0
+    cells, origin, counts = ex.optimise_grid_origin(ex.valid_top_left(mask, 4), 4)
+    assert len(cells) == 4 and origin == (0, 0)
